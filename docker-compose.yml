@@ -68,6 +68,10 @@ services:
     env_file:
       - .env
 
+    volumes:
+      - .:/app
+      - ./storage:/app/storage
+
     environment:
       DATABASE_URL: postgresql+asyncpg://perception:perception@postgres:5432/perception
       REDIS_URL: redis://redis:6379/0
@@ -91,8 +95,8 @@ services:
     ports:
       - "8000:8000"
 
-    volumes:
-      - storage_data:/app/storage
+    # volumes:
+    #   - storage_data:/app/storage
 
     healthcheck:
       test:

@@ -1,10 +1,5 @@
-# Dockerfile
-# True multi-stage build: build tools and wheel compilation happen in
-# `builder` only. The final `runtime` image starts fresh from a clean slim
-# base and copies in just the installed packages — no compilers, no dev
-# headers, smaller attack surface.
-
-FROM python:3.12-slim AS builder
+# Stage 0: Build tools and wheel compilation
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -23,14 +18,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
 
-FROM python:3.12-slim AS runtime
+# Stage 1: Clean runtime image
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
-# curl is needed at runtime only for the HEALTHCHECK; libjpeg/zlib runtime
-# (not -dev) libs are needed for Pillow — no compilers ship in this image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         libjpeg62-turbo \
@@ -39,14 +33,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN groupadd -r app && useradd -r -g app -d /app app
 
-COPY --from=builder /opt/venv /opt/venv
+# FIXED: Replaced --from=builder with --from=0 to completely bypass name resolution bugs
+COPY --from=0 /opt/venv /opt/venv
 
 WORKDIR /app
 COPY --chown=app:app . .
 
-RUN mkdir -p /app/storage/avatars /app/storage/perceptions /app/storage/comments_media /app/storage/topics \
-    && chown -R app:app /app/storage \
-    && chmod +x /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh \
+    && mkdir -p /app/storage/avatars /app/storage/perceptions /app/storage/comments_media /app/storage/topics \
+    && chown -R app:app /app/storage
 
 USER app
 
