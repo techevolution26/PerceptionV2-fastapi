@@ -1,13 +1,19 @@
 # app/api/routes/perceptions.py
+import os
+from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.api.deps import CurrentUser, DbSession, OptionalUser
 from app.models.models import Perception, Topic
 from app.schemas.content import PerceptionOut
 from app.services.perception_serialization import bulk_to_out, to_out
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+settings = get_settings()
+
 
 router = APIRouter(tags=["perceptions"])
 
@@ -76,7 +82,6 @@ async def perceptions_by_topic(topic_id: int, db: DbSession, viewer: OptionalUse
     perceptions = result.scalars().all()
     return await bulk_to_out(db, list(perceptions), viewer.id if viewer else None)
 
-
 @router.put("/perceptions/{perception_id}", response_model=PerceptionOut)
 async def update_perception(
     perception_id: int,
@@ -88,26 +93,74 @@ async def update_perception(
 ):
     result = await db.execute(
         select(Perception)
-        .where(Perception.id == perception_id, Perception.user_id == current_user.id)
+        .where(
+            Perception.id == perception_id, Perception.user_id == current_user.id
+        )
         .options(selectinload(Perception.user), selectinload(Perception.topic))
     )
     perception = result.scalar_one_or_none()
     if perception is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Perception not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Perception not found"
+        )
 
     if body is not None:
         perception.body = body
+
     if topic_id is not None:
-        topic_exists = await db.execute(select(Topic.id).where(Topic.id == topic_id))
+        topic_exists = await db.execute(
+            select(Topic.id).where(Topic.id == topic_id)
+        )
         if topic_exists.scalar_one_or_none() is None:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid topic_id")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Invalid topic_id",
+            )
         perception.topic_id = topic_id
+
+    # MEDIA REPLACEMENT & CLEANUP LOGIC
     if media is not None:
-        perception.media_url = await save_upload(media, "perceptions", allowed_types=ALLOWED_MEDIA_TYPES)
+        # 1. Store a reference to the old media URL path before overwriting it
+        old_media_url = perception.media_url
+
+        # 2. Upload and save the brand new media file
+        perception.media_url = await save_upload(
+            media, "perceptions", allowed_types=ALLOWED_MEDIA_TYPES
+        )
+
+        # 3. Clean up the old asset from disk if it exists
+        if old_media_url:
+            try:
+                # Extract relative folder location (e.g., from "/storage/perceptions/xyz.jpg" to "storage/perceptions/xyz.jpg")
+                relative_path = old_media_url.lstrip("/")
+                file_path = Path(settings.STORAGE_ROOT) / relative_path.replace(
+                    settings.STORAGE_URL_PREFIX.lstrip("/"), ""
+                ).lstrip("/")
+
+                # Check if it physically exists on disk and is a file, then remove it
+                if file_path.exists() and file_path.is_file():
+                    os.remove(file_path)
+            except Exception as e:
+                # Log the error but don't crash the request—updating the DB record takes priority
+                print(f"Failed to delete orphaned file {old_media_url}: {e}")
 
     await db.commit()
-    await db.refresh(perception, attribute_names=["user", "topic"])
+    
+    # Refreshing native database properties (body, media_url, updated_at, etc.) safely without any keyword errors
+    await db.refresh(perception)
+    
+    #Re-fetch the fully bound relationships to populate perception.user and perception.topic
+    # This matches exactly what selectinload expects in an async environment
+    result_refreshed = await db.execute(
+        select(Perception)
+        .where(Perception.id == perception.id)
+        .options(selectinload(Perception.user), selectinload(Perception.topic))
+    )
+    perception = result_refreshed.scalar_one()
+
+    # Serializing safely loaded object structure
     return await to_out(db, perception, current_user.id)
+
 
 
 @router.delete("/perceptions/{perception_id}")

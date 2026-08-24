@@ -1,9 +1,39 @@
 # app/services/perception_serialization.py
-from sqlalchemy import func, select
+from sqlalchemy import func, select, inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Comment, Like, Perception
 from app.schemas.content import PerceptionOut
+
+
+def _to_safe_dict(perception: Perception) -> dict:
+    """
+    Extracts raw database fields and eagerly checks loaded states using
+    SQLAlchemy's inspector to completely isolate memory values from lazy loading traps.
+    """
+    # 1. Grab all raw primitive columns currently loaded in memory
+    data = {
+        key: value 
+        for key, value in perception.__dict__.items() 
+        if not key.startswith('_')
+    }
+    
+    # 2. Use SQLAlchemy's inspector to check if relationships are actively loaded
+    insp = inspect(perception)
+    
+    # Check 'user' relationship state safely
+    if 'user' in insp.unloaded:
+        data['user'] = None  # Not loaded in memory, pass None to schema validation
+    else:
+        data['user'] = perception.user # Loaded, safe to assign
+        
+    # Check 'topic' relationship state safely
+    if 'topic' in insp.unloaded:
+        data['topic'] = None
+    else:
+        data['topic'] = perception.topic
+        
+    return data
 
 
 async def to_out(db: AsyncSession, perception: Perception, viewer_id: int | None) -> PerceptionOut:
@@ -21,8 +51,11 @@ async def to_out(db: AsyncSession, perception: Perception, viewer_id: int | None
         )
         liked_by_user = liked.scalar_one_or_none() is not None
 
+    # Process via safe relationship dictionary inspector
+    safe_data = _to_safe_dict(perception)
+    
     return PerceptionOut(
-        **PerceptionOut.model_validate(perception).model_dump(
+        **PerceptionOut.model_validate(safe_data).model_dump(
             exclude={"likes_count", "comments_count", "liked_by_user"}
         ),
         likes_count=likes_count,
@@ -61,9 +94,11 @@ async def bulk_to_out(db: AsyncSession, perceptions: list[Perception], viewer_id
 
     out = []
     for p in perceptions:
+        safe_data = _to_safe_dict(p)
+        
         out.append(
             PerceptionOut(
-                **PerceptionOut.model_validate(p).model_dump(
+                **PerceptionOut.model_validate(safe_data).model_dump(
                     exclude={"likes_count", "comments_count", "liked_by_user"}
                 ),
                 likes_count=likes_map.get(p.id, 0),
