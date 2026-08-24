@@ -1,0 +1,135 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: perception
+      POSTGRES_PASSWORD: perception
+      POSTGRES_DB: perception
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U perception -d perception"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    ports:
+      - "5432:5432"
+
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  soketi:
+    image: quay.io/soketi/soketi:1.6-16-alpine
+    restart: unless-stopped
+
+    environment:
+      SOKETI_DEBUG: "1"
+      SOKETI_DEFAULT_APP_ID: "100001"
+      SOKETI_DEFAULT_APP_KEY: "perception-key"
+      SOKETI_DEFAULT_APP_SECRET: "perception-secret"
+
+    ports:
+      - "6001:6001"
+      - "9601:9601"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:6001/', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+
+  api:
+    build: .
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      DATABASE_URL: postgresql+asyncpg://perception:perception@postgres:5432/perception
+      REDIS_URL: redis://redis:6379/0
+
+      PUSHER_HOST: soketi
+      PUSHER_PORT: 6001
+      PUSHER_APP_ID: "100001"
+      PUSHER_APP_KEY: perception-key
+      PUSHER_APP_SECRET: perception-secret
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+      soketi:
+        condition: service_healthy
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - storage_data:/app/storage
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:8000/api/health"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    develop:
+      watch:
+
+        # Python application source
+        - action: sync
+          path: ./app
+          target: /app/app
+          initial_sync: true
+          ignore:
+            - __pycache__/
+            - "*.pyc"
+
+        # Alembic migrations/config
+        - action: sync+restart
+          path: ./alembic
+          target: /app/alembic
+          initial_sync: true
+
+        # Python dependencies require an image rebuild
+        - action: rebuild
+          path: ./requirements.txt
+
+
+volumes:
+  postgres_data:
+  storage_data:
