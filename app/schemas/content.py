@@ -1,7 +1,7 @@
 # app/schemas/content.py
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.user import UserSlim
 
@@ -54,7 +54,7 @@ class CommentOut(BaseModel):
     media_url: str | None = None
     created_at: datetime
     user: UserSlim
-    replies: list["CommentOut"] = []
+    replies: list["CommentOut"] = Field(default_factory=list)
 
 
 CommentOut.model_rebuild()
