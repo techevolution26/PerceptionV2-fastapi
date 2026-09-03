@@ -4,8 +4,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.models import Comment, Follow, Like, Perception, Topic, TopicFollow, User
+from app.models.models import AnalyticsTopic, Comment, Follow, Like, Perception, Topic, TopicFollow, User
 from app.schemas.content import PerceptionOut, TopicOut
+from app.schemas.business import AnalyticsProfileUpdate
 from app.schemas.user import UpdateMeRequest, UserMe, UserProfile, UserSlim
 from app.services.storage import ALLOWED_IMAGE_TYPES, save_upload
 
@@ -49,12 +50,51 @@ async def update_me(payload: UpdateMeRequest, current_user: CurrentUser, db: DbS
     return current_user
 
 
+@router.put("/user/analytics-profile", response_model=UserMe)
+async def update_analytics_profile(
+    payload: AnalyticsProfileUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    topic_ids = list(dict.fromkeys(payload.analytics_specialties))
+    if payload.primary_analytics_topic_id is not None and payload.primary_analytics_topic_id not in topic_ids:
+        topic_ids.insert(0, payload.primary_analytics_topic_id)
+
+    if topic_ids:
+        valid_ids = (
+            await db.execute(select(Topic.id).where(Topic.id.in_(topic_ids)))
+        ).scalars().all()
+        if len(valid_ids) != len(topic_ids):
+            raise HTTPException(status_code=422, detail="One or more analytics topics are invalid.")
+
+    current_user.professional_focus = payload.professional_focus
+    current_user.country_code = payload.country_code.upper() if payload.country_code else None
+    current_user.region = payload.region
+    current_user.city = payload.city
+    current_user.primary_analytics_topic_id = payload.primary_analytics_topic_id
+    current_user.analytics_specialties = topic_ids
+
+    await db.execute(
+        AnalyticsTopic.__table__.delete().where(AnalyticsTopic.user_id == current_user.id)
+    )
+    for topic_id in topic_ids:
+        db.add(AnalyticsTopic(user_id=current_user.id, topic_id=topic_id))
+
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
+
 @router.post("/user/profile", response_model=UserMe)
 async def update_profile(
     current_user: CurrentUser,
     db: DbSession,
     profession: str | None = Form(default=None),
     bio: str | None = Form(default=None),
+    professional_focus: str | None = Form(default=None),
+    country_code: str | None = Form(default=None),
+    region: str | None = Form(default=None),
+    city: str | None = Form(default=None),
     avatar: UploadFile | None = File(default=None),
 ):
     if avatar is not None:
@@ -63,6 +103,14 @@ async def update_profile(
         current_user.profession = profession
     if bio is not None:
         current_user.bio = bio
+    if professional_focus is not None:
+        current_user.professional_focus = professional_focus
+    if country_code is not None:
+        current_user.country_code = country_code.upper() or None
+    if region is not None:
+        current_user.region = region
+    if city is not None:
+        current_user.city = city
 
     await db.commit()
     await db.refresh(current_user)

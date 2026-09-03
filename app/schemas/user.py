@@ -1,7 +1,7 @@
 # app/schemas/user.py
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserPublic(BaseModel):
@@ -16,6 +16,14 @@ class UserPublic(BaseModel):
     bio: str | None = None
     avatar_url: str | None = None
     profession: str | None = None
+    professional_focus: str | None = None
+    country_code: str | None = None
+    region: str | None = None
+    city: str | None = None
+    analytics_specialties: list[int] = Field(default_factory=list)
+    primary_analytics_topic_id: int | None = None
+    verification_status: str = "NOT_APPLIED"
+    verification_badge: str | None = None
     created_at: datetime
 
 
@@ -32,6 +40,7 @@ class UserMe(UserPublic):
     """Only ever returned to the authenticated user themself — includes email."""
 
     email: EmailStr
+    role: str = "USER"
 
 
 class UserSlim(BaseModel):
@@ -71,3 +80,10 @@ class AuthResponse(BaseModel):
 class UpdateMeRequest(BaseModel):
     name: str | None = None
     bio: str | None = None
+    profession: str | None = None
+    professional_focus: str | None = None
+    country_code: str | None = Field(default=None, min_length=2, max_length=2)
+    region: str | None = None
+    city: str | None = None
+    primary_analytics_topic_id: int | None = None
+    analytics_specialties: list[int] | None = None

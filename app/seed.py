@@ -10,8 +10,10 @@ import asyncio
 
 from sqlalchemy import select
 
+from app.core.config import get_settings
+
 from app.core.database import AsyncSessionLocal
-from app.models.models import Motivation, Topic
+from app.models.models import Motivation, Plan, Topic
 
 # Synchronized and matching your authentic Laravel seed collection including image_urls
 TOPICS = [
@@ -77,6 +79,57 @@ TOPICS = [
     },
 ]
 
+PLANS = [
+    {
+        "code": "free",
+        "name": "Free",
+        "description": "Explore Perception and contribute signals.",
+        "price_cents": 0,
+        "currency": "USD",
+        "interval": "month",
+        "analytics_enabled": False,
+        "max_topics": 0,
+        "verification_included": False,
+        "trial_days": 0,
+    },
+    {
+        "code": "professional",
+        "name": "Professional",
+        "description": "Analytics for professionals making evidence-informed decisions.",
+        "price_cents": 1200,
+        "currency": "USD",
+        "interval": "month",
+        "analytics_enabled": True,
+        "max_topics": 5,
+        "verification_included": True,
+        "trial_days": 14,
+    },
+    {
+        "code": "research",
+        "name": "Research",
+        "description": "Broader topic coverage for research and cross-field analysis.",
+        "price_cents": 2900,
+        "currency": "USD",
+        "interval": "month",
+        "analytics_enabled": True,
+        "max_topics": 15,
+        "verification_included": True,
+        "trial_days": 14,
+    },
+    {
+        "code": "business",
+        "name": "Business",
+        "description": "High-volume analytics for market and product decision-making.",
+        "price_cents": 7900,
+        "currency": "USD",
+        "interval": "month",
+        "analytics_enabled": True,
+        "max_topics": 50,
+        "verification_included": True,
+        "trial_days": 14,
+    },
+]
+
 MOTIVATIONS = [
     "Every perspective is a piece of the whole picture — share yours.",
     "The view from where you stand is worth more than you think.",
@@ -113,6 +166,22 @@ async def seed() -> None:
                 inserted_count += 1
 
         await db.flush()
+
+        existing_plans = {p.code: p for p in (await db.execute(select(Plan))).scalars().all()}
+        settings = get_settings()
+        stripe_prices = {
+            "professional": getattr(settings, "STRIPE_PRICE_PROFESSIONAL", ""),
+            "research": getattr(settings, "STRIPE_PRICE_RESEARCH", ""),
+            "business": getattr(settings, "STRIPE_PRICE_BUSINESS", ""),
+        }
+        for item in PLANS:
+            item = {**item, "stripe_price_id": stripe_prices.get(item["code"]) or None}
+            plan = existing_plans.get(item["code"])
+            if plan is None:
+                db.add(Plan(**item))
+            else:
+                for key, value in item.items():
+                    setattr(plan, key, value)
 
         # Seed motivations only if table is completely empty
         motivation_result = await db.execute(select(Motivation.id))

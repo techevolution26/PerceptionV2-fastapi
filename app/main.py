@@ -8,6 +8,9 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
     auth,
+    analytics,
+    subscriptions,
+    verification,
     broadcasting,
     comments,
     conversations,
@@ -56,6 +59,9 @@ app.mount(settings.STORAGE_URL_PREFIX, StaticFiles(directory=settings.STORAGE_RO
 for router in (
     health,
     auth,
+    analytics,
+    subscriptions,
+    verification,
     users,
     topics,
     perceptions,

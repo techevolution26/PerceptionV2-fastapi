@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     # --- Database ---
     DATABASE_URL: str = "postgresql+asyncpg://perception:perception@postgres:5432/perception"
 
+    # --- Billing / Stripe ---
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_SUCCESS_URL: str = "http://localhost:3000/billing/success"
+    STRIPE_CANCEL_URL: str = "http://localhost:3000/billing/cancel"
+    STRIPE_PAST_DUE_GRACE_DAYS: int = 0
+    STRIPE_PRICE_PROFESSIONAL: str = ""
+    STRIPE_PRICE_RESEARCH: str = ""
+    STRIPE_PRICE_BUSINESS: str = ""
+
     # --- Redis ---
     REDIS_URL: str = "redis://redis:6379/0"
 

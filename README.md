@@ -150,3 +150,70 @@ handful of genuine bugs, fixed here rather than carried forward:
   requests that trigger a broadcast (sending a message, liking, etc.) still
   succeed and persist — the live push just gets logged as a warning and
   skipped. Real-time is an enhancement, never a dependency for correctness.
+
+## Analytics & business model
+
+The FastAPI backend now contains the first production-oriented analytics domain:
+
+- **Plans and subscriptions** — seeded Free, Professional, Research and Business plans, with Stripe price IDs, trial status, billing periods and provider-backed entitlement state.
+- **Analytics entitlement** — analytics endpoints return `402 Payment Required` when an account does not have an active analytics-enabled plan. Paid access is granted only after Stripe webhook synchronization; starting Checkout alone never unlocks analytics.
+- **Analytics topics** — subscribers can select multiple topic areas while keeping one primary analytics topic/professional focus.
+- **Profile geography** — country, region and city fields support geographic coverage analysis.
+- **Professional verification** — applications capture profession, focus, primary topic, additional topics and evidence. Approval is intentionally a reviewed workflow rather than an automatic claim.
+- **Perception interactions** — authenticated daily-deduplicated VIEW and SHARE events complement the existing LIKE and COMMENT data.
+- **Signal methodology** — analytics reports observed engagement indices, sample size and geographic coverage. It explicitly does not present correlation/engagement as scientific proof, causation or validated scientific conclusions.
+- **Stripe billing** — hosted Checkout for recurring plans, Customer Portal for self-service billing, signed webhook verification, idempotent webhook event storage, renewal/payment-failure synchronization, and invoice history.
+
+Run the migration and seed reference plans:
+
+```bash
+alembic upgrade head
+python -m app.seed
+```
+
+
+### Stripe configuration
+
+The billing integration is intentionally provider-isolated at the application boundary. Configure the Stripe secret/webhook secret and one recurring Stripe Price ID for each paid plan:
+
+```bash
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_PROFESSIONAL=price_...
+STRIPE_PRICE_RESEARCH=price_...
+STRIPE_PRICE_BUSINESS=price_...
+STRIPE_SUCCESS_URL=https://your-web-app.example/billing/success
+STRIPE_CANCEL_URL=https://your-web-app.example/billing/cancel
+```
+
+Then run `alembic upgrade head` and `python -m app.seed`. Stripe Price IDs are stored on the plan rows; the API does not create live products/prices implicitly. Configure the Stripe webhook endpoint at `/api/subscription/webhook/stripe` and subscribe at minimum to `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, and `invoice.payment_failed`.
+
+The mobile app opens Stripe's hosted Checkout URL using the native browser and uses the same authenticated subscription endpoint to determine entitlement after the webhook has been processed. Billing management opens the Stripe Customer Portal.
+
+### Mobile routes
+
+The Expo app now includes:
+
+- `/analytics` — subscriber analytics dashboard.
+- `/subscription` — plan/trial and payment boundary screen.
+- `/analytics-profile` — professional identity, geography, primary topic and analytics-topic management.
+- `/verification` — professional verification application/status.
+
+The analytics icon on each `PerceptionCard` opens `/analytics`. An authenticated user without analytics entitlement is redirected to `/subscription` by the analytics screen.
+
+Administrators (`ADMIN` / `SUPER_ADMIN`) can review verification applications through the verification admin endpoints. Approval writes the reviewed badge to the user; rejection does not grant a badge.
+
+## Analytics intelligence layer
+
+The analytics feature now exposes a descriptive intelligence layer on top of perception activity:
+
+- period-over-period topic growth and momentum
+- daily perception activity trend
+- distinct participant count
+- sample-size evidence levels
+- strongest and emerging topics
+- opportunity signals for patterns worth investigating
+- geographic coverage based on profile country fields
+- methodology and limitations returned with every analytics response
+
+These outputs intentionally describe observed platform signals. They are not claims of causation, representative population demand, probability, or validated scientific conclusions.
