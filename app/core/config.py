@@ -14,7 +14,9 @@ class Settings(BaseSettings):
     see .env.example.
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     # --- App ---
     APP_NAME: str = "Perception API"
@@ -29,12 +31,14 @@ class Settings(BaseSettings):
     ADMIN_SESSION_EXPIRE_MINUTES: int = 15
     GOOGLE_CLIENT_IDS: str = Field(
         default="",
-        description="Comma-separated list of Google OAuth client IDs (from Google Cloud Console)"
+        description="Comma-separated Android/iOS Google OAuth client IDs",
     )
     LOGIN_RATE_LIMIT_PER_MINUTE: int = 8
 
     # --- Database ---
-    DATABASE_URL: str = "postgresql+asyncpg://perception:perception@postgres:5432/perception"
+    DATABASE_URL: str = (
+        "postgresql+asyncpg://perception:perception@postgres:5432/perception"
+    )
 
     # --- Billing / Stripe ---
     STRIPE_SECRET_KEY: str = ""

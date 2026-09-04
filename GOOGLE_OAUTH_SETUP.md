@@ -5,28 +5,25 @@ Your backend now supports Google OAuth login and registration. This guide docume
 
 ## Required Environment Variables
 
-Add these to your `.env` file:
+Add the native Android and iOS client IDs to your `.env` file:
 
 ```env
-GOOGLE_CLIENT_IDS=your-client-id-1.apps.googleusercontent.com,your-client-id-2.apps.googleusercontent.com
+GOOGLE_CLIENT_IDS=1007733623814-budt6fk7uf90lhj4ihmras7olgobdkd4.apps.googleusercontent.com,1007733623814-f642ptk0pb4qehio02evlkrqtc3icj5m.apps.googleusercontent.com
 ```
 
-**Note:** Multiple client IDs can be comma-separated (useful for dev, staging, and production environments).
+`GOOGLE_CLIENT_IDS` accepts multiple comma-separated IDs. The backend must include every native client ID that can issue tokens for the mobile apps. A web client ID is not required for the native mobile flow.
 
-## Getting Your Google Client ID
+## Getting Native Client IDs
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com)
 2. Create a new project or select an existing one
-3. Enable the **Google+ API**
+3. Configure the Google sign-in provider for the project
 4. Go to **Credentials** → **Create Credentials** → **OAuth 2.0 Client ID**
-5. Choose **Web application**
-6. Add authorized JavaScript origins:
-   - `http://localhost:3000` (for local development)
-   - `https://yourdomain.com` (for production)
-7. Add authorized redirect URIs:
-   - `http://localhost:3000/auth/google/callback` (for local development)
-   - `https://yourdomain.com/auth/google/callback` (for production)
-8. Copy the **Client ID** and add it to your `.env` file
+5. Create an **Android** client ID for the Android package and SHA-1 certificate
+6. Create an **iOS** client ID for the iOS bundle identifier
+7. Copy both client IDs into `GOOGLE_CLIENT_IDS`, separated by commas
+
+Native Google Sign-In returns the ID token directly from the SDK. There is no browser redirect URI for this flow, so the backend does not need to configure, store, or validate redirect URIs.
 
 ## Backend Changes
 
@@ -140,7 +137,7 @@ Your frontend needs to:
 
 **Frontend Code Example:**
 ```javascript
-// After Google Sign-In callback
+// After native Google Sign-In returns the ID token
 const response = await fetch('/api/google', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },

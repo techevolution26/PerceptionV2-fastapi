@@ -35,15 +35,15 @@
 ### Step 1: Get Google Client ID
 ```
 1. Visit: https://console.cloud.google.com
-2. Create OAuth 2.0 Client ID (Web application)
-3. Add JavaScript origins & redirect URIs
-4. Copy your Client ID
+2. Create an Android OAuth client ID for the package and SHA-1 certificate
+3. Create an iOS OAuth client ID for the bundle identifier
+4. Add both native client IDs to GOOGLE_CLIENT_IDS
 ```
 
 ### Step 2: Set Environment Variable
 ```bash
 # In your .env file
-GOOGLE_CLIENT_IDS=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_IDS=1007733623814-budt6fk7uf90lhj4ihmras7olgobdkd4.apps.googleusercontent.com,1007733623814-f642ptk0pb4qehio02evlkrqtc3icj5m.apps.googleusercontent.com
 ```
 
 ### Step 3: Run Database Migration
