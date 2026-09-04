@@ -41,7 +41,7 @@ class User(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(32), default="USER", nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column("password", String(255))
+    password_hash: Mapped[str | None] = mapped_column("password", String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     profession: Mapped[str | None] = mapped_column(String(255), nullable=True)
     professional_focus: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -6,7 +6,15 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import distinct, func, select
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.models import AnalyticsTopic, Comment, Like, Perception, PerceptionInteraction, Topic, User
+from app.models.models import (
+    AnalyticsTopic,
+    Comment,
+    Like,
+    Perception,
+    PerceptionInteraction,
+    Topic,
+    User,
+)
 from app.schemas.business import (
     AnalyticsEventRequest,
     AnalyticsGeoOut,
@@ -52,7 +60,9 @@ def _evidence_level(sample_size: int) -> str:
     return "insufficient"
 
 
-def _signal_score(*, perceptions: int, growth: float, engagement_rate: float, unique_participants: int) -> float:
+def _signal_score(
+    *, perceptions: int, growth: float, engagement_rate: float, unique_participants: int
+) -> float:
     """A bounded prioritisation score, not statistical confidence or probability."""
     if perceptions <= 0:
         return 0.0
@@ -60,7 +70,16 @@ def _signal_score(*, perceptions: int, growth: float, engagement_rate: float, un
     growth_component = min(1.0, max(0.0, growth + 1.0) / 2.0)
     engagement_component = min(1.0, engagement_rate / 10.0)
     diversity_component = min(1.0, unique_participants / perceptions)
-    return round(100 * (0.35 * volume + 0.30 * growth_component + 0.25 * engagement_component + 0.10 * diversity_component), 1)
+    return round(
+        100
+        * (
+            0.35 * volume
+            + 0.30 * growth_component
+            + 0.25 * engagement_component
+            + 0.10 * diversity_component
+        ),
+        1,
+    )
 
 
 def _anomaly_label(current: int, baseline: float) -> str:
@@ -86,12 +105,18 @@ async def _topic_scope(db: DbSession, user_id: int, max_topics: int) -> set[int]
 
 
 @router.post("/events", status_code=status.HTTP_201_CREATED)
-async def record_interaction(payload: AnalyticsEventRequest, current_user: CurrentUser, db: DbSession):
+async def record_interaction(
+    payload: AnalyticsEventRequest, current_user: CurrentUser, db: DbSession
+):
     event_type = payload.event_type.upper()
     if event_type not in {"VIEW", "SHARE"}:
-        raise HTTPException(status_code=422, detail="Supported analytics events: ['SHARE', 'VIEW']")
+        raise HTTPException(
+            status_code=422, detail="Supported analytics events: ['SHARE', 'VIEW']"
+        )
 
-    exists = await db.execute(select(Perception.id).where(Perception.id == payload.perception_id))
+    exists = await db.execute(
+        select(Perception.id).where(Perception.id == payload.perception_id)
+    )
     if exists.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Perception not found")
 
@@ -128,14 +153,23 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
 
     topic_scope = await _topic_scope(db, current_user.id, sub.plan.max_topics)
     current_filters = [Perception.created_at >= since]
-    previous_filters = [Perception.created_at >= previous_since, Perception.created_at < since]
+    previous_filters = [
+        Perception.created_at >= previous_since,
+        Perception.created_at < since,
+    ]
     if topic_scope:
         current_filters.append(Perception.topic_id.in_(topic_scope))
         previous_filters.append(Perception.topic_id.in_(topic_scope))
 
     current_rows = (
         await db.execute(
-            select(Perception.id, Perception.topic_id, User.id, User.country_code, Perception.created_at)
+            select(
+                Perception.id,
+                Perception.topic_id,
+                User.id,
+                User.country_code,
+                Perception.created_at,
+            )
             .join(User, User.id == Perception.user_id)
             .where(*current_filters)
         )
@@ -150,7 +184,16 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
     previous_counts = {topic_id: count for topic_id, count in previous_rows}
 
     ids = [row.id for row in current_rows]
-    topic_stats = defaultdict(lambda: {"perceptions": 0, "likes": 0, "comments": 0, "views": 0, "shares": 0, "participants": set()})
+    topic_stats = defaultdict(
+        lambda: {
+            "perceptions": 0,
+            "likes": 0,
+            "comments": 0,
+            "views": 0,
+            "shares": 0,
+            "participants": set(),
+        }
+    )
     geo_stats = defaultdict(lambda: {"perceptions": 0, "interactions": 0})
     trend_stats = defaultdict(lambda: {"perceptions": 0, "interactions": 0})
     participants = {row[2] for row in current_rows}
@@ -165,7 +208,11 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
     if ids:
         like_rows = (
             await db.execute(
-                select(Perception.topic_id, func.count(Like.id), func.count(distinct(Like.user_id)))
+                select(
+                    Perception.topic_id,
+                    func.count(Like.id),
+                    func.count(distinct(Like.user_id)),
+                )
                 .join(Like, Like.perception_id == Perception.id)
                 .where(Perception.id.in_(ids))
                 .group_by(Perception.topic_id)
@@ -176,7 +223,11 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
 
         comment_rows = (
             await db.execute(
-                select(Perception.topic_id, func.count(Comment.id), func.count(distinct(Comment.user_id)))
+                select(
+                    Perception.topic_id,
+                    func.count(Comment.id),
+                    func.count(distinct(Comment.user_id)),
+                )
                 .join(Comment, Comment.perception_id == Perception.id)
                 .where(Perception.id.in_(ids))
                 .group_by(Perception.topic_id)
@@ -186,9 +237,9 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
             topic_stats[topic_id]["comments"] = count
 
         participant_rows = await db.execute(
-            select(Like.user_id).where(Like.perception_id.in_(ids)).union(
-                select(Comment.user_id).where(Comment.perception_id.in_(ids))
-            )
+            select(Like.user_id)
+            .where(Like.perception_id.in_(ids))
+            .union(select(Comment.user_id).where(Comment.perception_id.in_(ids)))
         )
         interaction_users = participant_rows.scalars().all()
         participants.update(interaction_users)
@@ -198,9 +249,18 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
 
         event_rows = (
             await db.execute(
-                select(Perception.topic_id, PerceptionInteraction.event_type, func.count(PerceptionInteraction.id))
-                .join(PerceptionInteraction, PerceptionInteraction.perception_id == Perception.id)
-                .where(Perception.id.in_(ids), PerceptionInteraction.created_at >= since)
+                select(
+                    Perception.topic_id,
+                    PerceptionInteraction.event_type,
+                    func.count(PerceptionInteraction.id),
+                )
+                .join(
+                    PerceptionInteraction,
+                    PerceptionInteraction.perception_id == Perception.id,
+                )
+                .where(
+                    Perception.id.in_(ids), PerceptionInteraction.created_at >= since
+                )
                 .group_by(Perception.topic_id, PerceptionInteraction.event_type)
             )
         ).all()
@@ -212,7 +272,10 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
 
         event_participant_rows = await db.execute(
             select(Perception.topic_id, PerceptionInteraction.actor_user_id)
-            .join(PerceptionInteraction, PerceptionInteraction.perception_id == Perception.id)
+            .join(
+                PerceptionInteraction,
+                PerceptionInteraction.perception_id == Perception.id,
+            )
             .where(Perception.id.in_(ids), PerceptionInteraction.created_at >= since)
             .distinct()
         )
@@ -240,8 +303,14 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
 
         event_trend = (
             await db.execute(
-                select(func.date(PerceptionInteraction.created_at), func.count(PerceptionInteraction.id))
-                .where(PerceptionInteraction.perception_id.in_(ids), PerceptionInteraction.created_at >= since)
+                select(
+                    func.date(PerceptionInteraction.created_at),
+                    func.count(PerceptionInteraction.id),
+                )
+                .where(
+                    PerceptionInteraction.perception_id.in_(ids),
+                    PerceptionInteraction.created_at >= since,
+                )
                 .group_by(func.date(PerceptionInteraction.created_at))
             )
         ).all()
@@ -276,8 +345,13 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
             await db.execute(
                 select(User.country_code, func.count(PerceptionInteraction.id))
                 .join(Perception, Perception.user_id == User.id)
-                .join(PerceptionInteraction, PerceptionInteraction.perception_id == Perception.id)
-                .where(Perception.id.in_(ids), PerceptionInteraction.created_at >= since)
+                .join(
+                    PerceptionInteraction,
+                    PerceptionInteraction.perception_id == Perception.id,
+                )
+                .where(
+                    Perception.id.in_(ids), PerceptionInteraction.created_at >= since
+                )
                 .group_by(User.country_code)
             )
         ).all()
@@ -300,7 +374,9 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
                 views=stat["views"],
                 shares=stat["shares"],
                 interactions=interactions,
-                engagement_rate=round(interactions / perceptions, 2) if perceptions else 0.0,
+                engagement_rate=(
+                    round(interactions / perceptions, 2) if perceptions else 0.0
+                ),
                 signal_strength=_strength(interactions, perceptions),
                 signal_score=_signal_score(
                     perceptions=perceptions,
@@ -338,10 +414,20 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
             country_code=country,
             perception_count=data["perceptions"],
             interactions=data["interactions"],
-            engagement_rate=round(data["interactions"] / data["perceptions"], 2) if data["perceptions"] else 0.0,
-            share_of_perceptions=round(data["perceptions"] / total_perceptions, 3) if total_perceptions else 0.0,
+            engagement_rate=(
+                round(data["interactions"] / data["perceptions"], 2)
+                if data["perceptions"]
+                else 0.0
+            ),
+            share_of_perceptions=(
+                round(data["perceptions"] / total_perceptions, 3)
+                if total_perceptions
+                else 0.0
+            ),
         )
-        for country, data in sorted(geo_stats.items(), key=lambda item: item[1]["perceptions"], reverse=True)
+        for country, data in sorted(
+            geo_stats.items(), key=lambda item: item[1]["perceptions"], reverse=True
+        )
     ]
 
     trend = []
@@ -363,7 +449,9 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
     anomaly = _anomaly_label(round(recent_daily), baseline_daily)
 
     opportunities: list[AnalyticsOpportunityOut] = []
-    for topic in sorted(topics, key=lambda item: (item.signal_score, item.growth_rate), reverse=True):
+    for topic in sorted(
+        topics, key=lambda item: (item.signal_score, item.growth_rate), reverse=True
+    ):
         if topic.perception_count < 10:
             continue
         if topic.growth_rate >= 0.20 or topic.signal_strength >= 3.0:
@@ -389,7 +477,10 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
         if len(opportunities) == 5:
             break
 
-    primary_topic = next((t for t in topics if t.topic_id == current_user.primary_analytics_topic_id), None)
+    primary_topic = next(
+        (t for t in topics if t.topic_id == current_user.primary_analytics_topic_id),
+        None,
+    )
     strongest_topic = max(topics, key=lambda item: item.signal_score, default=None)
     emerging_topic = max(
         (t for t in topics if t.perception_count >= 10),
@@ -458,9 +549,17 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
         total_views=total_views,
         total_shares=total_shares,
         total_interactions=total_interactions,
-        engagement_rate=round(total_interactions / total_perceptions, 2) if total_perceptions else 0.0,
+        engagement_rate=(
+            round(total_interactions / total_perceptions, 2)
+            if total_perceptions
+            else 0.0
+        ),
         geographic_coverage=len([g for g in geography if g.country_code != "UNKNOWN"]),
-        primary_topic_id=primary_topic.topic_id if primary_topic else current_user.primary_analytics_topic_id,
+        primary_topic_id=(
+            primary_topic.topic_id
+            if primary_topic
+            else current_user.primary_analytics_topic_id
+        ),
         primary_topic_name=primary_topic.topic_name if primary_topic else None,
         strongest_topic=strongest_topic,
         emerging_topic=emerging_topic,
@@ -477,7 +576,9 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
 
 
 @router.get("/intelligence", response_model=dict)
-async def analytics_intelligence(current_user: CurrentUser, db: DbSession, days: int = 30):
+async def analytics_intelligence(
+    current_user: CurrentUser, db: DbSession, days: int = 30
+):
     """Cross-topic and geographic relationships for decision-support analytics.
 
     Relationships are descriptive associations based on shared authors and
@@ -492,11 +593,13 @@ async def analytics_intelligence(current_user: CurrentUser, db: DbSession, days:
     if topic_scope:
         filters.append(Perception.topic_id.in_(topic_scope))
 
-    rows = (await db.execute(
-        select(Perception.user_id, Perception.topic_id, User.country_code)
-        .join(User, User.id == Perception.user_id)
-        .where(*filters)
-    )).all()
+    rows = (
+        await db.execute(
+            select(Perception.user_id, Perception.topic_id, User.country_code)
+            .join(User, User.id == Perception.user_id)
+            .where(*filters)
+        )
+    ).all()
 
     topic_names = dict((await db.execute(select(Topic.id, Topic.name))).all())
     users_by_topic: dict[int, set[int]] = defaultdict(set)
@@ -512,7 +615,7 @@ async def analytics_intelligence(current_user: CurrentUser, db: DbSession, days:
     relationships: list[AnalyticsRelationshipOut] = []
     topic_ids = sorted(users_by_topic)
     for index, topic_a in enumerate(topic_ids):
-        for topic_b in topic_ids[index + 1:]:
+        for topic_b in topic_ids[index + 1 :]:
             a_users = users_by_topic[topic_a]
             b_users = users_by_topic[topic_b]
             shared = len(a_users & b_users)
@@ -524,14 +627,21 @@ async def analytics_intelligence(current_user: CurrentUser, db: DbSession, days:
             strength = round(100 * min(1.0, jaccard * 2.0) * min(1.0, shared / 50), 1)
             relationships.append(
                 AnalyticsRelationshipOut(
-                    topic_a_id=topic_a, topic_a_name=topic_names.get(topic_a, "Uncategorized"),
-                    topic_b_id=topic_b, topic_b_name=topic_names.get(topic_b, "Uncategorized"),
-                    shared_participants=shared, participant_overlap=round(jaccard, 3),
-                    relationship_strength=strength, evidence_level=_evidence_level(shared),
+                    topic_a_id=topic_a,
+                    topic_a_name=topic_names.get(topic_a, "Uncategorized"),
+                    topic_b_id=topic_b,
+                    topic_b_name=topic_names.get(topic_b, "Uncategorized"),
+                    shared_participants=shared,
+                    participant_overlap=round(jaccard, 3),
+                    relationship_strength=strength,
+                    evidence_level=_evidence_level(shared),
                 )
             )
 
-    relationships.sort(key=lambda item: (item.relationship_strength, item.shared_participants), reverse=True)
+    relationships.sort(
+        key=lambda item: (item.relationship_strength, item.shared_participants),
+        reverse=True,
+    )
     relationships = relationships[:20]
 
     geo_signals: list[AnalyticsGeoTopicOut] = []
@@ -542,12 +652,18 @@ async def analytics_intelligence(current_user: CurrentUser, db: DbSession, days:
         score = round(100 * min(1.0, share * 1.5) * min(1.0, count / 100), 1)
         geo_signals.append(
             AnalyticsGeoTopicOut(
-                topic_id=topic_id, topic_name=topic_names.get(topic_id, "Uncategorized"),
-                country_code=country, perception_count=count, share_of_topic=round(share, 3),
-                signal_score=score, evidence_level=_evidence_level(count),
+                topic_id=topic_id,
+                topic_name=topic_names.get(topic_id, "Uncategorized"),
+                country_code=country,
+                perception_count=count,
+                share_of_topic=round(share, 3),
+                signal_score=score,
+                evidence_level=_evidence_level(count),
             )
         )
-    geo_signals.sort(key=lambda item: (item.signal_score, item.perception_count), reverse=True)
+    geo_signals.sort(
+        key=lambda item: (item.signal_score, item.perception_count), reverse=True
+    )
     geo_signals = geo_signals[:30]
 
     return {
@@ -569,9 +685,13 @@ async def analytics_decision(current_user: CurrentUser, db: DbSession, days: int
     """Return an actionable decision-support lens for the user's primary professional area."""
     overview = await analytics_overview(current_user, db, days)
     primary = overview.primary_topic_name
-    focus = current_user.professional_focus or current_user.profession or "your focus area"
+    focus = (
+        current_user.professional_focus or current_user.profession or "your focus area"
+    )
 
-    ranked = sorted(overview.opportunities, key=lambda item: item.signal_score, reverse=True)
+    ranked = sorted(
+        overview.opportunities, key=lambda item: item.signal_score, reverse=True
+    )
     recommendations: list[dict[str, object]] = []
     for opportunity in ranked[:5]:
         if opportunity.evidence_level == "insufficient":
@@ -580,40 +700,52 @@ async def analytics_decision(current_user: CurrentUser, db: DbSession, days: int
             action = "Investigate the drivers of this growth and validate demand independently."
         else:
             action = "Compare this signal with local context and independent evidence."
-        recommendations.append({
-            "topic_id": opportunity.topic_id,
-            "topic_name": opportunity.topic_name,
-            "action": action,
-            "signal_score": opportunity.signal_score,
-            "evidence_level": opportunity.evidence_level,
-        })
+        recommendations.append(
+            {
+                "topic_id": opportunity.topic_id,
+                "topic_name": opportunity.topic_name,
+                "action": action,
+                "signal_score": opportunity.signal_score,
+                "evidence_level": opportunity.evidence_level,
+            }
+        )
 
     return {
         "period_days": overview.period_days,
         "lens": focus,
         "primary_topic_id": overview.primary_topic_id,
         "primary_topic_name": primary,
-        "strongest_signal": overview.strongest_topic.model_dump() if overview.strongest_topic else None,
-        "emerging_signal": overview.emerging_topic.model_dump() if overview.emerging_topic else None,
+        "strongest_signal": (
+            overview.strongest_topic.model_dump() if overview.strongest_topic else None
+        ),
+        "emerging_signal": (
+            overview.emerging_topic.model_dump() if overview.emerging_topic else None
+        ),
         "recommendations": recommendations,
         "guardrail": "These are observed signals and investigation prompts, not predictions, causal conclusions, proof of demand, or scientific findings.",
     }
 
 
 @router.get("/opportunities/{topic_id}", response_model=dict)
-async def analytics_opportunity_detail(topic_id: int, current_user: CurrentUser, db: DbSession, days: int = 30):
+async def analytics_opportunity_detail(
+    topic_id: int, current_user: CurrentUser, db: DbSession, days: int = 30
+):
     """Explain one topic signal with evidence, geography and related topics."""
     overview = await analytics_overview(current_user, db, days)
     topic = next((item for item in overview.topics if item.topic_id == topic_id), None)
     if topic is None:
-        raise HTTPException(status_code=404, detail="Analytics topic not found in the selected period")
+        raise HTTPException(
+            status_code=404, detail="Analytics topic not found in the selected period"
+        )
 
     since = datetime.now(timezone.utc) - timedelta(days=overview.period_days)
-    rows = (await db.execute(
-        select(Perception.user_id, Perception.topic_id, User.country_code)
-        .join(User, User.id == Perception.user_id)
-        .where(Perception.created_at >= since, Perception.topic_id == topic_id)
-    )).all()
+    rows = (
+        await db.execute(
+            select(Perception.user_id, Perception.topic_id, User.country_code)
+            .join(User, User.id == Perception.user_id)
+            .where(Perception.created_at >= since, Perception.topic_id == topic_id)
+        )
+    ).all()
     by_country: dict[str, int] = defaultdict(int)
     participants: set[int] = set()
     for user_id, _topic_id, country in rows:
@@ -621,7 +753,9 @@ async def analytics_opportunity_detail(topic_id: int, current_user: CurrentUser,
         by_country[(country or "UNKNOWN").upper()] += 1
 
     related: list[dict[str, object]] = []
-    for item in (await analytics_intelligence(current_user, db, overview.period_days))["relationships"]:
+    for item in (await analytics_intelligence(current_user, db, overview.period_days))[
+        "relationships"
+    ]:
         if item.topic_a_id == topic_id:
             related.append(item.model_dump())
         elif item.topic_b_id == topic_id:
@@ -629,8 +763,14 @@ async def analytics_opportunity_detail(topic_id: int, current_user: CurrentUser,
     related.sort(key=lambda item: float(item["relationship_strength"]), reverse=True)
 
     geography = [
-        {"country_code": code, "perception_count": count, "share_of_topic": round(count / len(rows), 3) if rows else 0.0}
-        for code, count in sorted(by_country.items(), key=lambda item: item[1], reverse=True)
+        {
+            "country_code": code,
+            "perception_count": count,
+            "share_of_topic": round(count / len(rows), 3) if rows else 0.0,
+        }
+        for code, count in sorted(
+            by_country.items(), key=lambda item: item[1], reverse=True
+        )
     ]
     return {
         "topic": topic.model_dump(),
@@ -640,24 +780,131 @@ async def analytics_opportunity_detail(topic_id: int, current_user: CurrentUser,
         "related_topics": related[:10],
         "recommended_next_step": (
             "Validate this signal with independent market, field, or domain evidence before acting."
-            if topic.evidence_level != "strong" else
-            "Use this as a prioritisation input, then validate the underlying hypothesis independently."
+            if topic.evidence_level != "strong"
+            else "Use this as a prioritisation input, then validate the underlying hypothesis independently."
         ),
         "guardrail": "Association and observed activity do not establish causation, population demand, or scientific validity.",
     }
 
 
 @router.get("/perceptions/{perception_id}", response_model=PerceptionAnalyticsOut)
-async def perception_analytics(perception_id:int,current_user:CurrentUser,db:DbSession,days:int=30):
-    await require_analytics_access(db,current_user.id); days=max(7,min(days,365))
-    p=await db.scalar(select(Perception).where(Perception.id==perception_id,Perception.user_id==current_user.id))
-    if p is None: raise HTTPException(404,"Perception not found")
-    since=max(p.created_at,datetime.now(timezone.utc)-timedelta(days=days))
-    likes=int(await db.scalar(select(func.count(Like.id)).where(Like.perception_id==p.id,Like.created_at>=since)) or 0)
-    comments=int(await db.scalar(select(func.count(Comment.id)).where(Comment.perception_id==p.id,Comment.created_at>=since)) or 0)
-    views=int(await db.scalar(select(func.count(PerceptionInteraction.id)).where(PerceptionInteraction.perception_id==p.id,PerceptionInteraction.event_type=="VIEW",PerceptionInteraction.created_at>=since)) or 0)
-    shares=int(await db.scalar(select(func.count(PerceptionInteraction.id)).where(PerceptionInteraction.perception_id==p.id,PerceptionInteraction.event_type=="SHARE",PerceptionInteraction.created_at>=since)) or 0)
-    ids=set((await db.execute(select(Like.user_id).where(Like.perception_id==p.id))).scalars().all()); ids.update((await db.execute(select(Comment.user_id).where(Comment.perception_id==p.id))).scalars().all()); ids.update((await db.execute(select(PerceptionInteraction.actor_user_id).where(PerceptionInteraction.perception_id==p.id,PerceptionInteraction.created_at>=since))).scalars().all())
-    activity=(await db.execute(select(func.date(PerceptionInteraction.created_at),func.count(PerceptionInteraction.id)).where(PerceptionInteraction.perception_id==p.id,PerceptionInteraction.created_at>=since).group_by(func.date(PerceptionInteraction.created_at)).order_by(func.date(PerceptionInteraction.created_at)))).all()
-    geo=(await db.execute(select(User.country_code,func.count(PerceptionInteraction.id)).join(PerceptionInteraction,PerceptionInteraction.actor_user_id==User.id).where(PerceptionInteraction.perception_id==p.id,PerceptionInteraction.created_at>=since).group_by(User.country_code).order_by(func.count(PerceptionInteraction.id).desc()).limit(10))).all()
-    return PerceptionAnalyticsOut(perception_id=p.id,period_days=days,created_at=p.created_at,topic_id=p.topic_id,likes=likes,comments=comments,views=views,shares=shares,unique_participants=len(ids),engagement_rate=round((likes+comments+shares)/views, 4) if views else 0.0,daily_activity=[{"date":str(d),"interactions":int(c)} for d,c in activity],top_countries=[{"country_code":c or "UNKNOWN","interactions":int(cn)} for c,cn in geo],methodology=["Observed interaction counts for this perception; not causal inference.","Likes/comments use the selected period; VIEW/SHARE are deduplicated per participant per event type per day.","Engagement rate = (likes + comments + shares) / views for the selected period; 0 when no views are observed.","Geography uses the interacting user's profile country when available."])
+async def perception_analytics(
+    perception_id: int, current_user: CurrentUser, db: DbSession, days: int = 30
+):
+    await require_analytics_access(db, current_user.id)
+    days = max(7, min(days, 365))
+    p = await db.scalar(
+        select(Perception).where(
+            Perception.id == perception_id, Perception.user_id == current_user.id
+        )
+    )
+    if p is None:
+        raise HTTPException(404, "Perception not found")
+    since = max(p.created_at, datetime.now(timezone.utc) - timedelta(days=days))
+    likes = int(
+        await db.scalar(
+            select(func.count(Like.id)).where(
+                Like.perception_id == p.id, Like.created_at >= since
+            )
+        )
+        or 0
+    )
+    comments = int(
+        await db.scalar(
+            select(func.count(Comment.id)).where(
+                Comment.perception_id == p.id, Comment.created_at >= since
+            )
+        )
+        or 0
+    )
+    views = int(
+        await db.scalar(
+            select(func.count(PerceptionInteraction.id)).where(
+                PerceptionInteraction.perception_id == p.id,
+                PerceptionInteraction.event_type == "VIEW",
+                PerceptionInteraction.created_at >= since,
+            )
+        )
+        or 0
+    )
+    shares = int(
+        await db.scalar(
+            select(func.count(PerceptionInteraction.id)).where(
+                PerceptionInteraction.perception_id == p.id,
+                PerceptionInteraction.event_type == "SHARE",
+                PerceptionInteraction.created_at >= since,
+            )
+        )
+        or 0
+    )
+    ids = set(
+        (await db.execute(select(Like.user_id).where(Like.perception_id == p.id)))
+        .scalars()
+        .all()
+    )
+    ids.update(
+        (await db.execute(select(Comment.user_id).where(Comment.perception_id == p.id)))
+        .scalars()
+        .all()
+    )
+    ids.update(
+        (
+            await db.execute(
+                select(PerceptionInteraction.actor_user_id).where(
+                    PerceptionInteraction.perception_id == p.id,
+                    PerceptionInteraction.created_at >= since,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    activity = (
+        await db.execute(
+            select(
+                func.date(PerceptionInteraction.created_at),
+                func.count(PerceptionInteraction.id),
+            )
+            .where(
+                PerceptionInteraction.perception_id == p.id,
+                PerceptionInteraction.created_at >= since,
+            )
+            .group_by(func.date(PerceptionInteraction.created_at))
+            .order_by(func.date(PerceptionInteraction.created_at))
+        )
+    ).all()
+    geo = (
+        await db.execute(
+            select(User.country_code, func.count(PerceptionInteraction.id))
+            .join(PerceptionInteraction, PerceptionInteraction.actor_user_id == User.id)
+            .where(
+                PerceptionInteraction.perception_id == p.id,
+                PerceptionInteraction.created_at >= since,
+            )
+            .group_by(User.country_code)
+            .order_by(func.count(PerceptionInteraction.id).desc())
+            .limit(10)
+        )
+    ).all()
+    return PerceptionAnalyticsOut(
+        perception_id=p.id,
+        period_days=days,
+        created_at=p.created_at,
+        topic_id=p.topic_id,
+        likes=likes,
+        comments=comments,
+        views=views,
+        shares=shares,
+        unique_participants=len(ids),
+        engagement_rate=round((likes + comments + shares) / views, 4) if views else 0.0,
+        daily_activity=[{"date": str(d), "interactions": int(c)} for d, c in activity],
+        top_countries=[
+            {"country_code": c or "UNKNOWN", "interactions": int(cn)} for c, cn in geo
+        ],
+        methodology=[
+            "Observed interaction counts for this perception; not causal inference.",
+            "Likes/comments use the selected period; VIEW/SHARE are deduplicated per participant per event type per day.",
+            "Engagement rate = (likes + comments + shares) / views for the selected period; 0 when no views are observed.",
+            "Geography uses the interacting user's profile country when available.",
+        ],
+    )

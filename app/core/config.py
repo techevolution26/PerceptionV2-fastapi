@@ -27,7 +27,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 14
     ADMIN_SESSION_EXPIRE_MINUTES: int = 15
-    GOOGLE_CLIENT_IDS: str = ""
+    GOOGLE_CLIENT_IDS: str = Field(
+        default="",
+        description="Comma-separated list of Google OAuth client IDs (from Google Cloud Console)"
+    )
     LOGIN_RATE_LIMIT_PER_MINUTE: int = 8
 
     # --- Database ---
