@@ -180,3 +180,19 @@ class AnalyticsProfileUpdate(BaseModel):
     city: str | None = None
     primary_analytics_topic_id: int | None = None
     analytics_specialties: list[int] = Field(default_factory=list, max_length=100)
+
+
+class PerceptionAnalyticsOut(BaseModel):
+    perception_id: int
+    period_days: int
+    created_at: datetime
+    topic_id: int | None
+    likes: int
+    comments: int
+    views: int
+    shares: int
+    unique_participants: int
+    engagement_rate: float
+    daily_activity: list[dict]
+    top_countries: list[dict]
+    methodology: list[str]

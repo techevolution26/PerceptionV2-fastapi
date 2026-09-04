@@ -8,6 +8,7 @@ from app.api.deps import CurrentUser, DbSession
 from app.models.models import Comment, Perception
 from app.schemas.content import CommentOut
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
+from app.services.notifications import notify
 
 router = APIRouter(tags=["comments"])
 
@@ -207,7 +208,9 @@ async def create_comment(
     )
 
     created_comment = result.scalar_one()
-
+    owner_id = (await db.execute(select(Perception.user_id).where(Perception.id == perception_id))).scalar_one()
+    if owner_id != current_user.id:
+        await notify(db, user_id=owner_id, ntype="perception_comment", data={"perception_id": perception_id, "comment_id": comment.id, "actor_id": current_user.id, "actor_name": current_user.name}, commit=True)
     return created_comment
 
 
@@ -314,7 +317,8 @@ async def create_reply(
     )
 
     created_reply = result.scalar_one()
-
+    if parent_comment.user_id != current_user.id:
+        await notify(db, user_id=parent_comment.user_id, ntype="comment_reply", data={"perception_id": parent_comment.perception_id, "comment_id": reply.id, "actor_id": current_user.id, "actor_name": current_user.name}, commit=True)
     return created_reply
 
 

@@ -17,6 +17,7 @@ from app.schemas.business import (
     AnalyticsGeoTopicOut,
     AnalyticsTopicOut,
     AnalyticsTrendPoint,
+    PerceptionAnalyticsOut,
 )
 from app.services.subscriptions import require_analytics_access
 
@@ -644,3 +645,19 @@ async def analytics_opportunity_detail(topic_id: int, current_user: CurrentUser,
         ),
         "guardrail": "Association and observed activity do not establish causation, population demand, or scientific validity.",
     }
+
+
+@router.get("/perceptions/{perception_id}", response_model=PerceptionAnalyticsOut)
+async def perception_analytics(perception_id:int,current_user:CurrentUser,db:DbSession,days:int=30):
+    await require_analytics_access(db,current_user.id); days=max(7,min(days,365))
+    p=await db.scalar(select(Perception).where(Perception.id==perception_id,Perception.user_id==current_user.id))
+    if p is None: raise HTTPException(404,"Perception not found")
+    since=max(p.created_at,datetime.now(timezone.utc)-timedelta(days=days))
+    likes=int(await db.scalar(select(func.count(Like.id)).where(Like.perception_id==p.id,Like.created_at>=since)) or 0)
+    comments=int(await db.scalar(select(func.count(Comment.id)).where(Comment.perception_id==p.id,Comment.created_at>=since)) or 0)
+    views=int(await db.scalar(select(func.count(PerceptionInteraction.id)).where(PerceptionInteraction.perception_id==p.id,PerceptionInteraction.event_type=="VIEW",PerceptionInteraction.created_at>=since)) or 0)
+    shares=int(await db.scalar(select(func.count(PerceptionInteraction.id)).where(PerceptionInteraction.perception_id==p.id,PerceptionInteraction.event_type=="SHARE",PerceptionInteraction.created_at>=since)) or 0)
+    ids=set((await db.execute(select(Like.user_id).where(Like.perception_id==p.id))).scalars().all()); ids.update((await db.execute(select(Comment.user_id).where(Comment.perception_id==p.id))).scalars().all()); ids.update((await db.execute(select(PerceptionInteraction.actor_user_id).where(PerceptionInteraction.perception_id==p.id,PerceptionInteraction.created_at>=since))).scalars().all())
+    activity=(await db.execute(select(func.date(PerceptionInteraction.created_at),func.count(PerceptionInteraction.id)).where(PerceptionInteraction.perception_id==p.id,PerceptionInteraction.created_at>=since).group_by(func.date(PerceptionInteraction.created_at)).order_by(func.date(PerceptionInteraction.created_at)))).all()
+    geo=(await db.execute(select(User.country_code,func.count(PerceptionInteraction.id)).join(PerceptionInteraction,PerceptionInteraction.actor_user_id==User.id).where(PerceptionInteraction.perception_id==p.id,PerceptionInteraction.created_at>=since).group_by(User.country_code).order_by(func.count(PerceptionInteraction.id).desc()).limit(10))).all()
+    return PerceptionAnalyticsOut(perception_id=p.id,period_days=days,created_at=p.created_at,topic_id=p.topic_id,likes=likes,comments=comments,views=views,shares=shares,unique_participants=len(ids),engagement_rate=round((likes+comments+shares)/views, 4) if views else 0.0,daily_activity=[{"date":str(d),"interactions":int(c)} for d,c in activity],top_countries=[{"country_code":c or "UNKNOWN","interactions":int(cn)} for c,cn in geo],methodology=["Observed interaction counts for this perception; not causal inference.","Likes/comments use the selected period; VIEW/SHARE are deduplicated per participant per event type per day.","Engagement rate = (likes + comments + shares) / views for the selected period; 0 when no views are observed.","Geography uses the interacting user's profile country when available."])

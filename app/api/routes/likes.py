@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.models import Like, Perception
+from app.services.notifications import notify
 from app.schemas.misc import LikeToggleOut
 
 router = APIRouter(tags=["likes"])
@@ -25,8 +26,11 @@ async def like_perception(perception_id: int, current_user: CurrentUser, db: DbS
         select(Like).where(Like.perception_id == perception_id, Like.user_id == current_user.id)
     )
     if existing.scalar_one_or_none() is None:
+        perception = (await db.execute(select(Perception).where(Perception.id == perception_id))).scalar_one()
         db.add(Like(perception_id=perception_id, user_id=current_user.id))
         await db.commit()
+        if perception.user_id != current_user.id:
+            await notify(db, user_id=perception.user_id, ntype="perception_like", data={"perception_id": perception_id, "actor_id": current_user.id, "actor_name": current_user.name}, commit=True)
 
     return LikeToggleOut(liked=True, likes_count=await _likes_count(db, perception_id))
 

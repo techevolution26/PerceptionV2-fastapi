@@ -5,9 +5,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserPublic(BaseModel):
-    """Public profile shape — NEVER includes email. The original Laravel
-    endpoint leaked email on the public `/users/{id}` route; intentionally
-    excluded here."""
+    """Minimal public identity. Account and analytics-profile fields stay private."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -16,31 +14,32 @@ class UserPublic(BaseModel):
     bio: str | None = None
     avatar_url: str | None = None
     profession: str | None = None
-    professional_focus: str | None = None
-    country_code: str | None = None
-    region: str | None = None
-    city: str | None = None
-    analytics_specialties: list[int] = Field(default_factory=list)
-    primary_analytics_topic_id: int | None = None
     verification_status: str = "NOT_APPLIED"
     verification_badge: str | None = None
     created_at: datetime
 
 
 class UserProfile(UserPublic):
-    """Public profile + engagement counts, used by ProfileSection.jsx."""
-
+    """Public profile + engagement counts; never exposes account credentials."""
     perceptions_count: int = 0
     followers_count: int = 0
     following_count: int = 0
     topics_count: int = 0
+    is_following: bool = False
+    can_message: bool = False
 
 
 class UserMe(UserPublic):
-    """Only ever returned to the authenticated user themself — includes email."""
+    """Authenticated account shape; private profile and analytics fields live here."""
 
     email: EmailStr
     role: str = "USER"
+    professional_focus: str | None = None
+    country_code: str | None = None
+    region: str | None = None
+    city: str | None = None
+    analytics_specialties: list[int] = Field(default_factory=list)
+    primary_analytics_topic_id: int | None = None
 
 
 class UserSlim(BaseModel):
@@ -70,6 +69,9 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str = Field(min_length=20, max_length=8192)
 
 
 class AuthResponse(BaseModel):

@@ -1,7 +1,6 @@
-# app/api/deps.py
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,36 +10,35 @@ from app.core.security import decode_access_token
 from app.models.models import User
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
-
-# auto_error=False so we can support both "required auth" and "optional auth"
-# endpoints (many profile/topic/perception reads are public, but personalize
-# the response — e.g. liked_by_user — when a valid token IS present).
 _bearer = HTTPBearer(auto_error=False)
 
 
-async def _resolve_user(
-    db: AsyncSession, credentials: HTTPAuthorizationCredentials | None
-) -> User | None:
-    if credentials is None or not credentials.credentials:
+async def _resolve_user(db: AsyncSession, credentials: HTTPAuthorizationCredentials | None, *, scope: str) -> User | None:
+    if not credentials or not credentials.credentials:
         return None
-    user_id = decode_access_token(credentials.credentials)
-    if user_id is None:
+    payload = decode_access_token(credentials.credentials)
+    if not payload or payload.get("scope", "user") != scope:
         return None
-    result = await db.execute(select(User).where(User.id == user_id))
-    return result.scalar_one_or_none()
+
+    try:
+        user_id = int(payload["sub"])
+        token_version = int(payload.get("ver", -1))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    user = await db.scalar(select(User).where(User.id == user_id))
+    if user is None or not user.is_active or token_version != user.token_version:
+        return None
+    return user
 
 
 async def get_current_user(
     db: DbSession,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)] = None,
 ) -> User:
-    user = await _resolve_user(db, credentials)
+    user = await _resolve_user(db, credentials, scope="user")
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthenticated.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise HTTPException(401, "Unauthenticated.", headers={"WWW-Authenticate": "Bearer"})
     return user
 
 
@@ -48,17 +46,28 @@ async def get_current_user_optional(
     db: DbSession,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)] = None,
 ) -> User | None:
-    return await _resolve_user(db, credentials)
+    return await _resolve_user(db, credentials, scope="user")
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+OptionalUser = Annotated[User | None, Depends(get_current_user_optional)]
 
 
 async def get_current_admin(current_user: CurrentUser) -> User:
     if current_user.role not in {"ADMIN", "SUPER_ADMIN"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required.")
+        raise HTTPException(403, "Administrator access required.")
     return current_user
 
 
+async def get_current_super_admin(
+    db: DbSession,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)] = None,
+) -> User:
+    user = await _resolve_user(db, credentials, scope="admin")
+    if user is None or user.role != "SUPER_ADMIN":
+        raise HTTPException(403, "Super administrator access required.")
+    return user
+
+
 AdminUser = Annotated[User, Depends(get_current_admin)]
-OptionalUser = Annotated[User | None, Depends(get_current_user_optional)]
+SuperAdminUser = Annotated[User, Depends(get_current_super_admin)]

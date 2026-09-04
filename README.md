@@ -217,3 +217,12 @@ The analytics feature now exposes a descriptive intelligence layer on top of per
 - methodology and limitations returned with every analytics response
 
 These outputs intentionally describe observed platform signals. They are not claims of causation, representative population demand, probability, or validated scientific conclusions.
+
+## Security and platform controls
+
+- Password login is rate-limited through Redis and JWTs carry a per-user token version, so logout, suspension, and restoration invalidate previously issued sessions.
+- Production responses include baseline security headers and HSTS when `ENVIRONMENT=production`.
+- Google sign-in verifies Google identity tokens server-side against configured client IDs; the API never trusts a client-supplied email as proof of identity.
+- Public profiles intentionally omit account email/role and expose only presentation and engagement information.
+- Messaging is limited to mutual follows for new conversations, supports bounded edit/recall windows, and keeps archive/delete state per user.
+- Super-admin control is protected by a separate short-lived admin token obtained through password re-authentication. Administrative user suspension/restoration is audited.

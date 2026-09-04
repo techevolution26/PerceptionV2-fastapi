@@ -3,12 +3,13 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser, DbSession
-from app.models.models import AnalyticsTopic, Comment, Follow, Like, Perception, Topic, TopicFollow, User
+from app.api.deps import CurrentUser, DbSession, OptionalUser
+from app.models.models import AnalyticsTopic, Comment, Follow, Like, Message, Perception, Topic, TopicFollow, User
 from app.schemas.content import PerceptionOut, TopicOut
 from app.schemas.business import AnalyticsProfileUpdate
 from app.schemas.user import UpdateMeRequest, UserMe, UserProfile, UserSlim
 from app.services.storage import ALLOWED_IMAGE_TYPES, save_upload
+from app.services.notifications import notify
 
 router = APIRouter(tags=["users"])
 
@@ -118,23 +119,29 @@ async def update_profile(
 
 
 @router.get("/users/{user_id}", response_model=UserProfile)
-async def get_user_profile(user_id: int, db: DbSession):
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
+async def get_user_profile(user_id: int, db: DbSession, viewer: OptionalUser):
+    user = await db.scalar(select(User).where(User.id == user_id, User.is_active.is_(True)))
+    if user is None: raise HTTPException(status_code=404, detail="User not found")
     counts = await _profile_counts(db, user_id)
+    following = False; can_message = False
+    if viewer and viewer.id != user_id:
+        following = (await db.scalar(select(Follow.follower_id).where(Follow.follower_id == viewer.id, Follow.followed_id == user_id))) is not None
+        reciprocal = (await db.scalar(select(Follow.follower_id).where(Follow.follower_id == user_id, Follow.followed_id == viewer.id))) is not None
+        existing = (await db.scalar(select(Message.id).where(((Message.from_user_id == viewer.id) & (Message.to_user_id == user_id)) | ((Message.from_user_id == user_id) & (Message.to_user_id == viewer.id))).limit(1))) is not None
+        can_message = existing or (following and reciprocal)
     return UserProfile(
         id=user.id,
         name=user.name,
         bio=user.bio,
         avatar_url=user.avatar_url,
         profession=user.profession,
+        verification_status=user.verification_status,
+        verification_badge=user.verification_badge,
         created_at=user.created_at,
+        is_following=following,
+        can_message=can_message,
         **counts,
     )
-
 
 @router.get("/users/{user_id}/perceptions", response_model=list[PerceptionOut])
 async def get_user_perceptions(user_id: int, db: DbSession):
@@ -191,7 +198,7 @@ async def follow_user(user_id: int, current_user: CurrentUser, db: DbSession):
     if existing.scalar_one_or_none() is None:
         db.add(Follow(follower_id=current_user.id, followed_id=user_id))
         await db.commit()
-
+        await notify(db, user_id=user_id, ntype="follow", data={"actor_id": current_user.id, "actor_name": current_user.name, "message": f"{current_user.name} followed you."}, commit=True)
     return {"message": f"Now following user {user_id}"}
 
 
@@ -219,18 +226,5 @@ async def get_followers(user_id: int, db: DbSession):
 async def get_following(user_id: int, db: DbSession):
     result = await db.execute(
         select(User).join(Follow, Follow.followed_id == User.id).where(Follow.follower_id == user_id)
-    )
-    return result.scalars().all()
-
-
-@router.get("/search-users", response_model=list[UserSlim])
-async def search_users(db: DbSession, query: str = ""):
-    if not query:
-        return []
-    like = f"%{query}%"
-    result = await db.execute(
-        select(User).where(
-            (User.name.ilike(like)) | (User.email.ilike(like)) | (User.profession.ilike(like))
-        ).limit(30)
     )
     return result.scalars().all()

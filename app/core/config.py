@@ -25,7 +25,10 @@ class Settings(BaseSettings):
     # --- Security / auth ---
     SECRET_KEY: str = Field(default="change-me-in-prod-please-please-please")
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 14  # 14 days — matches Sanctum's non-expiring feel
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 14
+    ADMIN_SESSION_EXPIRE_MINUTES: int = 15
+    GOOGLE_CLIENT_IDS: str = ""
+    LOGIN_RATE_LIMIT_PER_MINUTE: int = 8
 
     # --- Database ---
     DATABASE_URL: str = "postgresql+asyncpg://perception:perception@postgres:5432/perception"

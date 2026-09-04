@@ -59,6 +59,11 @@ def broadcast_new_message(peer_id: int, message: dict) -> None:
     _safe_trigger(f"conversations.{peer_id}", "NewMessage", {"message": message})
 
 
+def broadcast_message_update(peer_id: int, message: dict) -> None:
+    """Push message edits/recalls so an open chat stays consistent."""
+    _safe_trigger(f"conversations.{peer_id}", "MessageUpdated", {"message": message})
+
+
 def authenticate_channel(channel_name: str, socket_id: str) -> dict:
     """Implements Pusher's private-channel auth handshake so
     POST /api/broadcasting/auth can authorize a subscription."""

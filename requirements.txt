@@ -22,6 +22,7 @@ bcrypt==4.0.1
 # --- Real-time (Pusher-protocol; works against soketi) ---
 pusher==3.3.3
 httpx==0.28.1
+google-auth==2.40.3
 
 # --- Scheduled jobs ---
 apscheduler==3.11.0

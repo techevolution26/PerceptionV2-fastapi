@@ -3,11 +3,11 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.models import Notification
-from app.schemas.misc import NotificationOut, NotificationsListOut
+from app.schemas.misc import NotificationOut, NotificationsListOut, UnreadCountOut
 
 router = APIRouter(tags=["notifications"])
 
@@ -48,3 +48,7 @@ async def delete_notification(notification_id: uuid.UUID, current_user: CurrentU
     await db.delete(note)
     await db.commit()
     return {"message": "Deleted"}
+
+@router.get("/notifications/unread-count", response_model=UnreadCountOut)
+async def unread_count(current_user: CurrentUser, db: DbSession):
+    return UnreadCountOut(count=int(await db.scalar(select(func.count(Notification.id)).where(Notification.user_id == current_user.id, Notification.read_at.is_(None))) or 0))
