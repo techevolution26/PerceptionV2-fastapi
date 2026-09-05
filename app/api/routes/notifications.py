@@ -51,4 +51,4 @@ async def delete_notification(notification_id: uuid.UUID, current_user: CurrentU
 
 @router.get("/notifications/unread-count", response_model=UnreadCountOut)
 async def unread_count(current_user: CurrentUser, db: DbSession):
-    return UnreadCountOut(count=int(await db.scalar(select(func.count(Notification.id)).where(Notification.user_id == current_user.id, Notification.read_at.is_(None))) or 0))
+    return UnreadCountOut(unread_count=int(await db.scalar(select(func.count(Notification.id)).where(Notification.user_id == current_user.id, Notification.read_at.is_(None))) or 0))

@@ -62,7 +62,9 @@ services:
 
 
   api:
-    build: .
+    build:
+      context: .
+      network: host
     restart: unless-stopped
 
     env_file:

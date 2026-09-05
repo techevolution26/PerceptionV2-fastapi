@@ -59,9 +59,35 @@ async def list_conversations(
         "AND cs.archived_at IS NOT NULL" if archived else "AND cs.archived_at IS NULL"
     )
     rows = await db.execute(
-        text(
-            f"""SELECT DISTINCT ON (peer_id) peer_id,body,created_at FROM (SELECT to_user_id AS peer_id,body,created_at FROM messages WHERE from_user_id=:me UNION ALL SELECT from_user_id AS peer_id,body,created_at FROM messages WHERE to_user_id=:me) c LEFT JOIN conversation_states cs ON cs.user_id=:me AND cs.peer_id=c.peer_id WHERE (cs.deleted_at IS NULL) {state} ORDER BY peer_id,created_at DESC"""
-        ),
+        text(f"""
+            SELECT DISTINCT ON (c.peer_id)
+                c.peer_id,
+                c.body,
+                c.created_at
+            FROM (
+                SELECT
+                    to_user_id AS peer_id,
+                    body,
+                    created_at
+                FROM messages
+                WHERE from_user_id = :me
+
+                UNION ALL
+
+                SELECT
+                    from_user_id AS peer_id,
+                    body,
+                    created_at
+                FROM messages
+                WHERE to_user_id = :me
+            ) c
+            LEFT JOIN conversation_states cs
+                ON cs.user_id = :me
+                AND cs.peer_id = c.peer_id
+            WHERE cs.deleted_at IS NULL
+            {state}
+            ORDER BY c.peer_id, c.created_at DESC
+            """),
         {"me": me},
     )
     last = {r.peer_id: r for r in rows.all()}
