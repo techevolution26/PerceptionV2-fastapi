@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from math import sqrt
 
 from fastapi import APIRouter, HTTPException, status
+from sqlalchemy.orm import selectinload
 from sqlalchemy import distinct, func, select
 
 from app.api.deps import CurrentUser, DbSession
@@ -794,9 +795,9 @@ async def perception_analytics(
     await require_analytics_access(db, current_user.id)
     days = max(7, min(days, 365))
     p = await db.scalar(
-        select(Perception).where(
-            Perception.id == perception_id, Perception.user_id == current_user.id
-        )
+        select(Perception)
+        .options(selectinload(Perception.user), selectinload(Perception.topic))
+        .where(Perception.id == perception_id, Perception.user_id == current_user.id)
     )
     if p is None:
         raise HTTPException(404, "Perception not found")
@@ -873,24 +874,43 @@ async def perception_analytics(
             .order_by(func.date(PerceptionInteraction.created_at))
         )
     ).all()
-    geo = (
-        await db.execute(
-            select(User.country_code, func.count(PerceptionInteraction.id))
-            .join(PerceptionInteraction, PerceptionInteraction.actor_user_id == User.id)
-            .where(
-                PerceptionInteraction.perception_id == p.id,
-                PerceptionInteraction.created_at >= since,
-            )
-            .group_by(User.country_code)
-            .order_by(func.count(PerceptionInteraction.id).desc())
-            .limit(10)
-        )
-    ).all()
+    participants = (
+        (await db.execute(select(User).where(User.id.in_(ids)))).scalars().all()
+        if ids
+        else []
+    )
+
+    # Keep the first small-scope audience view intentionally aggregate-only.
+    # Role/location claims are suppressed when the participant sample is too small.
+    audience_minimum = 5
+    country_counts: dict[str, int] = {}
+    role_counts: dict[str, int] = {}
+    if len(participants) >= audience_minimum:
+        for participant in participants:
+            country = (participant.country_code or "UNKNOWN").upper()
+            country_counts[country] = country_counts.get(country, 0) + 1
+            roles = participant.professional_roles or []
+            if not roles and participant.profession:
+                roles = [participant.profession]
+            for role_code in roles[:5]:
+                role_counts[str(role_code)] = role_counts.get(str(role_code), 0) + 1
+
+    # Role labels are resolved from the user's structured identity.
+    role_label_by_code: dict[str, str] = {}
+    for participant in participants:
+        for code, label in zip(
+            participant.professional_roles or [], participant.professional_role_labels
+        ):
+            role_label_by_code[str(code)] = label
+
     return PerceptionAnalyticsOut(
         perception_id=p.id,
         period_days=days,
         created_at=p.created_at,
         topic_id=p.topic_id,
+        topic_name=p.topic.name if p.topic else None,
+        author_professional_role=p.primary_professional_role_label or p.profession,
+        author_verified=p.verification_status == "VERIFIED",
         likes=likes,
         comments=comments,
         views=views,
@@ -899,12 +919,26 @@ async def perception_analytics(
         engagement_rate=round((likes + comments + shares) / views, 4) if views else 0.0,
         daily_activity=[{"date": str(d), "interactions": int(c)} for d, c in activity],
         top_countries=[
-            {"country_code": c or "UNKNOWN", "interactions": int(cn)} for c, cn in geo
+            {"country_code": code, "participants": count}
+            for code, count in sorted(
+                country_counts.items(), key=lambda item: item[1], reverse=True
+            )[:10]
+        ],
+        top_professional_roles=[
+            {
+                "role_code": code,
+                "role_label": role_label_by_code.get(code, code),
+                "participants": count,
+            }
+            for code, count in sorted(
+                role_counts.items(), key=lambda item: item[1], reverse=True
+            )[:10]
         ],
         methodology=[
             "Observed interaction counts for this perception; not causal inference.",
             "Likes/comments use the selected period; VIEW/SHARE are deduplicated per participant per event type per day.",
             "Engagement rate = (likes + comments + shares) / views for the selected period; 0 when no views are observed.",
-            "Geography uses the interacting user's profile country when available.",
+            "Audience geography and professional-role breakdowns count unique interacting participants, not raw events.",
+            "Audience breakdowns are suppressed below 5 unique participants to avoid over-interpreting very small groups.",
         ],
     )

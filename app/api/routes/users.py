@@ -76,9 +76,20 @@ async def update_analytics_profile(
     current_user: CurrentUser,
     db: DbSession,
 ):
-    topic_ids = list(dict.fromkeys(payload.analytics_specialties))
-    if payload.primary_analytics_topic_id is not None and payload.primary_analytics_topic_id not in topic_ids:
-        topic_ids.insert(0, payload.primary_analytics_topic_id)
+    # Professional identity is managed by the dedicated identity flow.
+    # The analytical profile only controls analytical scope and location context.
+    topic_ids = (
+        list(dict.fromkeys(payload.analytics_specialties))
+        if payload.analytics_specialties is not None
+        else list(current_user.analytics_specialties or [])
+    )
+    primary_topic_id = (
+        payload.primary_analytics_topic_id
+        if payload.primary_analytics_topic_id is not None
+        else current_user.primary_analytics_topic_id
+    )
+    if primary_topic_id is not None and primary_topic_id not in topic_ids:
+        topic_ids.insert(0, primary_topic_id)
 
     if topic_ids:
         valid_ids = (
@@ -87,28 +98,22 @@ async def update_analytics_profile(
         if len(valid_ids) != len(topic_ids):
             raise HTTPException(status_code=422, detail="One or more analytics topics are invalid.")
 
-    try:
-        validate_identity_selection(payload.professional_industries, payload.professional_roles, payload.primary_professional_role)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload.country_code is not None:
+        current_user.country_code = payload.country_code.upper() or None
+    if payload.region is not None:
+        current_user.region = payload.region
+    if payload.city is not None:
+        current_user.city = payload.city
+    if payload.primary_analytics_topic_id is not None:
+        current_user.primary_analytics_topic_id = payload.primary_analytics_topic_id
+    if payload.analytics_specialties is not None:
+        current_user.analytics_specialties = topic_ids
 
-    current_user.professional_focus = payload.professional_focus
-    current_user.professional_industries = list(dict.fromkeys(payload.professional_industries))
-    current_user.professional_roles = list(dict.fromkeys(payload.professional_roles))
-    current_user.primary_professional_role = payload.primary_professional_role
-    if payload.primary_professional_role:
-        current_user.profession = ROLE_MAP[payload.primary_professional_role]["label"]
-    current_user.country_code = payload.country_code.upper() if payload.country_code else None
-    current_user.region = payload.region
-    current_user.city = payload.city
-    current_user.primary_analytics_topic_id = payload.primary_analytics_topic_id
-    current_user.analytics_specialties = topic_ids
-
-    await db.execute(
-        AnalyticsTopic.__table__.delete().where(AnalyticsTopic.user_id == current_user.id)
-    )
-    for topic_id in topic_ids:
-        db.add(AnalyticsTopic(user_id=current_user.id, topic_id=topic_id))
+        await db.execute(
+            AnalyticsTopic.__table__.delete().where(AnalyticsTopic.user_id == current_user.id)
+        )
+        for topic_id in topic_ids:
+            db.add(AnalyticsTopic(user_id=current_user.id, topic_id=topic_id))
 
     await db.commit()
     await db.refresh(current_user)

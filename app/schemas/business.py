@@ -118,8 +118,6 @@ class AnalyticsOpportunityOut(BaseModel):
     evidence_level: str
 
 
-
-
 class AnalyticsRelationshipOut(BaseModel):
     topic_a_id: int
     topic_a_name: str
@@ -139,6 +137,7 @@ class AnalyticsGeoTopicOut(BaseModel):
     share_of_topic: float
     signal_score: float
     evidence_level: str
+
 
 class AnalyticsOverviewOut(BaseModel):
     period_days: int
@@ -173,16 +172,13 @@ class AnalyticsEventRequest(BaseModel):
 
 
 class AnalyticsProfileUpdate(BaseModel):
-    professional_focus: str | None = None
-    profession: str | None = None
+    # Analytical-profile settings are intentionally separate from professional identity.
+    # Identity is managed through /user and /professional-taxonomy.
     country_code: str | None = Field(default=None, min_length=2, max_length=2)
     region: str | None = None
     city: str | None = None
     primary_analytics_topic_id: int | None = None
-    analytics_specialties: list[int] = Field(default_factory=list, max_length=100)
-    professional_industries: list[str] = Field(default_factory=list, max_length=20)
-    professional_roles: list[str] = Field(default_factory=list, max_length=20)
-    primary_professional_role: str | None = Field(default=None, max_length=128)
+    analytics_specialties: list[int] | None = Field(default=None, max_length=100)
 
 
 class PerceptionAnalyticsOut(BaseModel):
@@ -190,6 +186,9 @@ class PerceptionAnalyticsOut(BaseModel):
     period_days: int
     created_at: datetime
     topic_id: int | None
+    topic_name: str | None = None
+    author_professional_role: str | None = None
+    author_verified: bool = False
     likes: int
     comments: int
     views: int
@@ -198,4 +197,5 @@ class PerceptionAnalyticsOut(BaseModel):
     engagement_rate: float
     daily_activity: list[dict]
     top_countries: list[dict]
+    top_professional_roles: list[dict]
     methodology: list[str]
