@@ -145,7 +145,7 @@ async def get_user_profile(user_id: int, db: DbSession, viewer: OptionalUser):
 
 @router.get("/users/{user_id}/perceptions", response_model=list[PerceptionOut])
 async def get_user_perceptions(user_id: int, db: DbSession):
-    exists = await db.execute(select(User.id).where(User.id == user_id))
+    exists = await db.execute(select(User.id).where(User.id == user_id, User.is_active.is_(True)))
     if exists.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -188,7 +188,7 @@ async def follow_user(user_id: int, current_user: CurrentUser, db: DbSession):
     if current_user.id == user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot follow yourself")
 
-    target = await db.execute(select(User.id).where(User.id == user_id))
+    target = await db.execute(select(User.id).where(User.id == user_id, User.is_active.is_(True)))
     if target.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -217,7 +217,7 @@ async def unfollow_user(user_id: int, current_user: CurrentUser, db: DbSession):
 @router.get("/users/{user_id}/followers", response_model=list[UserSlim])
 async def get_followers(user_id: int, db: DbSession):
     result = await db.execute(
-        select(User).join(Follow, Follow.follower_id == User.id).where(Follow.followed_id == user_id)
+        select(User).join(Follow, Follow.follower_id == User.id).where(Follow.followed_id == user_id, User.is_active.is_(True))
     )
     return result.scalars().all()
 
@@ -225,6 +225,6 @@ async def get_followers(user_id: int, db: DbSession):
 @router.get("/users/{user_id}/following", response_model=list[UserSlim])
 async def get_following(user_id: int, db: DbSession):
     result = await db.execute(
-        select(User).join(Follow, Follow.followed_id == User.id).where(Follow.follower_id == user_id)
+        select(User).join(Follow, Follow.followed_id == User.id).where(Follow.follower_id == user_id, User.is_active.is_(True))
     )
     return result.scalars().all()

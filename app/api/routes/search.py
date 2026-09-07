@@ -12,7 +12,7 @@ async def search(db:DbSession,viewer:OptionalUser,query:str=""):
     q=" ".join(query.split())[:120]
     if len(q)<2:return []
     like=f"%{q}%"; relevance=case((Perception.body.ilike(f"{q}%"),5),(Topic.name.ilike(f"{q}%"),4),(User.name.ilike(f"{q}%"),4),(Perception.body.ilike(like),2),else_=1)
-    rows=await db.execute(select(Perception).join(User,User.id==Perception.user_id).outerjoin(Topic,Topic.id==Perception.topic_id).where(or_(Perception.body.ilike(like),Topic.name.ilike(like),User.name.ilike(like),User.profession.ilike(like),User.professional_focus.ilike(like))).options(selectinload(Perception.user),selectinload(Perception.topic)).order_by(relevance.desc(),Perception.created_at.desc()).limit(50))
+    rows=await db.execute(select(Perception).join(User,User.id==Perception.user_id).outerjoin(Topic,Topic.id==Perception.topic_id).where(User.is_active.is_(True), or_(Perception.body.ilike(like),Topic.name.ilike(like),User.name.ilike(like),User.profession.ilike(like),User.professional_focus.ilike(like))).options(selectinload(Perception.user),selectinload(Perception.topic)).order_by(relevance.desc(),Perception.created_at.desc()).limit(50))
     return await bulk_to_out(db,list(rows.scalars().all()),viewer.id if viewer else None)
 @router.get("/search-users",response_model=list[UserSlim])
 async def search_users(db:DbSession,query:str=""):

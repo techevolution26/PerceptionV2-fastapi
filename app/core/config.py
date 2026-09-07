@@ -2,7 +2,7 @@
 from functools import lru_cache
 from typing import List
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     # --- Security / auth ---
     SECRET_KEY: str = Field(default="change-me-in-prod-please-please-please")
     JWT_ALGORITHM: str = "HS256"
+    JWT_ISSUER: str = "perception-api"
+    JWT_AUDIENCE: str = "perception-client"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 14
     ADMIN_SESSION_EXPIRE_MINUTES: int = 15
     GOOGLE_CLIENT_IDS: str = Field(
@@ -34,6 +36,21 @@ class Settings(BaseSettings):
         description="Comma-separated Android/iOS Google OAuth client IDs",
     )
     LOGIN_RATE_LIMIT_PER_MINUTE: int = 8
+    ADMIN_SESSION_RATE_LIMIT_PER_MINUTE: int = 5
+    RATE_LIMIT_FAIL_OPEN: bool = False
+
+    @model_validator(mode="after")
+    def validate_production_security(self):
+        if self.ENVIRONMENT == "production":
+            if self.DEBUG:
+                raise ValueError("DEBUG must be false in production")
+            if len(self.SECRET_KEY) < 32 or self.SECRET_KEY == "change-me-in-prod-please-please-please":
+                raise ValueError("A strong SECRET_KEY is required in production")
+            if self.RATE_LIMIT_FAIL_OPEN:
+                raise ValueError("RATE_LIMIT_FAIL_OPEN must be false in production")
+            if not self.cors_origins_list:
+                raise ValueError("CORS_ORIGINS must contain at least one origin in production")
+        return self
 
     # --- Database ---
     DATABASE_URL: str = (

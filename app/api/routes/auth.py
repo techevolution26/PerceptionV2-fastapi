@@ -3,6 +3,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from sqlalchemy import select
 from redis.asyncio import Redis
+import hashlib
 from app.api.deps import CurrentUser, DbSession
 from app.core.config import get_settings
 from app.core.security import create_access_token, hash_password, verify_password
@@ -18,24 +19,28 @@ router = APIRouter(tags=["auth"])
 settings = get_settings()
 
 
-async def _rate_limit(request: Request):
+async def _rate_limit(request: Request, *, bucket: str = "login", identity: str | None = None, limit: int | None = None):
+    """Redis-backed fixed-window limiter. In production, Redis failure fails closed."""
+    key_identity = identity or (request.client.host if request.client else "unknown")
+    digest = hashlib.sha256(key_identity.strip().lower().encode()).hexdigest()
+    key = f"auth:{bucket}:{digest}"
     try:
         redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
-        key = f"auth:login:{request.client.host if request.client else 'unknown'}"
         count = await redis.incr(key)
         if count == 1:
             await redis.expire(key, 60)
         await redis.aclose()
-        if count > settings.LOGIN_RATE_LIMIT_PER_MINUTE:
-            raise HTTPException(429, "Too many login attempts. Try again shortly.")
-    except HTTPException:
-        raise
     except Exception:
-        return
+        if settings.RATE_LIMIT_FAIL_OPEN:
+            return
+        raise HTTPException(503, "Authentication service temporarily unavailable.")
+    if count > (limit or settings.LOGIN_RATE_LIMIT_PER_MINUTE):
+        raise HTTPException(429, "Too many authentication attempts. Try again shortly.")
 
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
-async def register(payload: RegisterRequest, db: DbSession):
+async def register(payload: RegisterRequest, request: Request, db: DbSession):
+    await _rate_limit(request, bucket="register", identity=f"ip:{request.client.host if request.client else 'unknown'}", limit=5)
     if payload.password != payload.password_confirmation:
         raise HTTPException(
             422, {"errors": {"password": ["The password confirmation does not match."]}}
@@ -45,13 +50,13 @@ async def register(payload: RegisterRequest, db: DbSession):
             422,
             {"errors": {"password": ["The password must be at least 8 characters."]}},
         )
-    if await db.scalar(select(User.id).where(User.email == payload.email)):
+    if await db.scalar(select(User.id).where(User.email == str(payload.email).lower().strip())):
         raise HTTPException(
             422, {"errors": {"email": ["The email has already been taken."]}}
         )
     user = User(
         name=payload.name.strip(),
-        email=payload.email,
+        email=str(payload.email).lower().strip(),
         password_hash=hash_password(payload.password),
     )
     db.add(user)
@@ -64,8 +69,10 @@ async def register(payload: RegisterRequest, db: DbSession):
 
 @router.post("/login", response_model=AuthResponse)
 async def login(payload: LoginRequest, request: Request, db: DbSession):
-    await _rate_limit(request)
-    user = await db.scalar(select(User).where(User.email == payload.email))
+    normalized_email = str(payload.email).lower().strip()
+    await _rate_limit(request, identity=f"ip:{request.client.host if request.client else 'unknown'}")
+    await _rate_limit(request, bucket="login-account", identity=normalized_email)
+    user = await db.scalar(select(User).where(User.email == normalized_email))
     if user is None or user.password_hash is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             422, {"errors": {"email": ["The provided credentials are incorrect."]}}
@@ -134,8 +141,9 @@ async def logout(current_user: CurrentUser, db: DbSession):
 
 @router.post("/admin/session", response_model=dict)
 async def admin_session(
-    payload: LoginRequest, current_user: CurrentUser, db: DbSession
+    payload: LoginRequest, request: Request, current_user: CurrentUser, db: DbSession
 ):
+    await _rate_limit(request, bucket="admin-session", identity=f"user:{current_user.id}", limit=settings.ADMIN_SESSION_RATE_LIMIT_PER_MINUTE)
     if (
         current_user.role != "SUPER_ADMIN"
         or payload.email.lower() != current_user.email.lower()

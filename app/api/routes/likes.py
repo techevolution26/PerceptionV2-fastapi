@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.models import Like, Perception
+from app.models.models import Like, Perception, User
 from app.services.notifications import notify
 from app.schemas.misc import LikeToggleOut
 
@@ -18,7 +18,7 @@ async def _likes_count(db: DbSession, perception_id: int) -> int:
 
 @router.post("/perceptions/{perception_id}/like", response_model=LikeToggleOut)
 async def like_perception(perception_id: int, current_user: CurrentUser, db: DbSession):
-    exists = await db.execute(select(Perception.id).where(Perception.id == perception_id))
+    exists = await db.execute(select(Perception.id).join(User, User.id == Perception.user_id).where(Perception.id == perception_id, User.is_active.is_(True)))
     if exists.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Perception not found")
 
@@ -26,7 +26,7 @@ async def like_perception(perception_id: int, current_user: CurrentUser, db: DbS
         select(Like).where(Like.perception_id == perception_id, Like.user_id == current_user.id)
     )
     if existing.scalar_one_or_none() is None:
-        perception = (await db.execute(select(Perception).where(Perception.id == perception_id))).scalar_one()
+        perception = (await db.execute(select(Perception).join(User, User.id == Perception.user_id).where(Perception.id == perception_id, User.is_active.is_(True)))).scalar_one()
         db.add(Like(perception_id=perception_id, user_id=current_user.id))
         await db.commit()
         if perception.user_id != current_user.id:

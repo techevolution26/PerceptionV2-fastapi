@@ -107,7 +107,7 @@ async def list_conversations(
         unread[uid] = unread.get(uid, 0) + 1
     users = {
         u.id: u
-        for u in (await db.execute(select(User).where(User.id.in_(ids))))
+        for u in (await db.execute(select(User).where(User.id.in_(ids), User.is_active.is_(True))))
         .scalars()
         .all()
     }
@@ -138,7 +138,7 @@ async def get_conversation(
 ):
     if (
         peer_id == current_user.id
-        or await db.scalar(select(User.id).where(User.id == peer_id)) is None
+        or await db.scalar(select(User.id).where(User.id == peer_id, User.is_active.is_(True))) is None
     ):
         raise HTTPException(404, "Conversation user not found")
     limit = max(1, min(limit, 100))
@@ -178,7 +178,7 @@ async def _send(db, me, peer, body):
         raise HTTPException(422, "Message cannot be empty")
     if me == peer:
         raise HTTPException(400, "You cannot message yourself")
-    if await db.scalar(select(User.id).where(User.id == peer)) is None:
+    if await db.scalar(select(User.id).where(User.id == peer, User.is_active.is_(True))) is None:
         raise HTTPException(404, "User not found")
     if not await _exists(db, me, peer) and not await _mutual(db, me, peer):
         raise HTTPException(403, "Messaging opens when you both follow each other.")
@@ -312,7 +312,7 @@ async def recall(message_id: int, current_user: CurrentUser, db: DbSession):
 async def archive(peer_id: int, current_user: CurrentUser, db: DbSession):
     if (
         peer_id == current_user.id
-        or await db.scalar(select(User.id).where(User.id == peer_id)) is None
+        or await db.scalar(select(User.id).where(User.id == peer_id, User.is_active.is_(True))) is None
     ):
         raise HTTPException(404, "Conversation user not found")
     st = await db.scalar(
@@ -334,7 +334,7 @@ async def archive(peer_id: int, current_user: CurrentUser, db: DbSession):
 async def delete(peer_id: int, current_user: CurrentUser, db: DbSession):
     if (
         peer_id == current_user.id
-        or await db.scalar(select(User.id).where(User.id == peer_id)) is None
+        or await db.scalar(select(User.id).where(User.id == peer_id, User.is_active.is_(True))) is None
     ):
         raise HTTPException(404, "Conversation user not found")
     st = await db.scalar(

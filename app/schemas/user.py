@@ -1,7 +1,7 @@
 # app/schemas/user.py
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class UserPublic(BaseModel):
@@ -60,10 +60,17 @@ class UserWithUnread(UserSlim):
 
 
 class RegisterRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=255)
     email: EmailStr
-    password: str
-    password_confirmation: str
+    password: str = Field(min_length=8, max_length=128)
+    password_confirmation: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if not any(c.isupper() for c in value) or not any(c.islower() for c in value) or not any(c.isdigit() for c in value) or not any(not c.isalnum() for c in value):
+            raise ValueError("Password must contain uppercase, lowercase, number, and special character.")
+        return value
 
 
 class LoginRequest(BaseModel):

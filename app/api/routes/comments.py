@@ -2,10 +2,10 @@
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
-from sqlalchemy.orm import noload, selectinload
+from sqlalchemy.orm import aliased, noload, selectinload
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.models import Comment, Perception
+from app.models.models import Comment, Perception, User
 from app.schemas.content import CommentOut
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
 from app.services.notifications import notify
@@ -72,12 +72,19 @@ async def list_comments(
     relationship loading and avoids MissingGreenlet with AsyncSession.
     """
 
+    author = aliased(User)
+    owner = aliased(User)
     result = await db.execute(
         select(Comment)
-        .where(Comment.perception_id == perception_id)
-        .options(
-            selectinload(Comment.user),
+        .join(author, author.id == Comment.user_id)
+        .join(Perception, Perception.id == Comment.perception_id)
+        .join(owner, owner.id == Perception.user_id)
+        .where(
+            Comment.perception_id == perception_id,
+            author.is_active.is_(True),
+            owner.is_active.is_(True),
         )
+        .options(selectinload(Comment.user))
         .order_by(Comment.created_at.asc())
     )
 
@@ -142,8 +149,8 @@ async def create_comment(
 
     # Verify that the perception exists.
     perception_exists = await db.execute(
-        select(Perception.id).where(
-            Perception.id == perception_id,
+        select(Perception.id).join(User, User.id == Perception.user_id).where(
+            Perception.id == perception_id, User.is_active.is_(True),
         )
     )
 

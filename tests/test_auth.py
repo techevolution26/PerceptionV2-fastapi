@@ -74,3 +74,16 @@ async def test_public_profile_never_includes_email(client):
     res = await client.get(f"/api/users/{user_id}")
     assert res.status_code == 200
     assert "email" not in res.json()
+
+
+async def test_register_rejects_weak_password(client):
+    res = await client.post(
+        "/api/register",
+        json={
+            "name": "Weak User",
+            "email": "weak@example.com",
+            "password": "password",
+            "password_confirmation": "password",
+        },
+    )
+    assert res.status_code == 422

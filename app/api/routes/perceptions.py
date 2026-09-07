@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.core.config import get_settings
 from app.api.deps import CurrentUser, DbSession, OptionalUser
-from app.models.models import Perception, Topic
+from app.models.models import Perception, Topic, User
 from app.schemas.content import PerceptionOut
 from app.services.perception_serialization import bulk_to_out, to_out
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
@@ -22,6 +22,8 @@ router = APIRouter(tags=["perceptions"])
 async def list_perceptions(db: DbSession, viewer: OptionalUser, topic_id: int | None = None):
     query = (
         select(Perception)
+        .join(User, User.id == Perception.user_id)
+        .where(User.is_active.is_(True))
         .options(selectinload(Perception.user), selectinload(Perception.topic))
         .order_by(Perception.created_at.desc())
     )
@@ -61,7 +63,8 @@ async def create_perception(
 async def get_perception(perception_id: int, db: DbSession, viewer: OptionalUser):
     result = await db.execute(
         select(Perception)
-        .where(Perception.id == perception_id)
+        .join(User, User.id == Perception.user_id)
+        .where(Perception.id == perception_id, User.is_active.is_(True))
         .options(selectinload(Perception.user), selectinload(Perception.topic))
     )
     perception = result.scalar_one_or_none()
@@ -75,7 +78,8 @@ async def get_perception(perception_id: int, db: DbSession, viewer: OptionalUser
 async def perceptions_by_topic(topic_id: int, db: DbSession, viewer: OptionalUser):
     result = await db.execute(
         select(Perception)
-        .where(Perception.topic_id == topic_id)
+        .join(User, User.id == Perception.user_id)
+        .where(Perception.topic_id == topic_id, User.is_active.is_(True))
         .options(selectinload(Perception.user), selectinload(Perception.topic))
         .order_by(Perception.created_at.desc())
     )
