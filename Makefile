@@ -1,4 +1,4 @@
-.PHONY: up down build logs migrate seed test lint shell
+.PHONY: up down build logs migrate seed test acceptance lint shell
 
 up:        ## Start the full stack (build + migrate + seed happen automatically)
 	docker compose up --build
@@ -18,8 +18,11 @@ revision:  ## Create a new Alembic revision — usage: make revision m="add foo"
 seed:      ## Re-run the baseline data seed
 	docker compose exec api python -m app.seed
 
-test:      ## Run the test suite (locally, not in Docker — see README)
-	pytest tests/ -v
+test:      ## Run the fast local test suite
+	pytest tests/ -v -m "not acceptance"
+
+acceptance: ## Run the end-to-end release gate against the running stack
+	pytest tests/acceptance/ -v -m acceptance
 
 lint:      ## Run ruff
 	ruff check app/ tests/

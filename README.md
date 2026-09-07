@@ -57,15 +57,35 @@ uvicorn app.main:app --reload
 
 ## Tests
 
+### Fast local suite
+
 ```bash
-pytest tests/ -v
+pytest tests/ -v -m "not acceptance"
 ruff check app/ tests/
 ```
 
-13 tests, run against an in-memory SQLite database for speed. One route
-(`GET /api/conversations`) uses a Postgres-only `DISTINCT ON` query for
-efficiency and isn't covered by the fast suite — see the note at the top of
-`tests/test_conversations.py` for how to exercise it against real Postgres.
+The fast suite uses an in-memory SQLite database for speed. One route
+(`GET /api/conversations`) uses Postgres-only `DISTINCT ON` syntax and is
+covered by the end-to-end acceptance gate instead.
+
+### Stage 3 release gate
+
+The full end-to-end matrix lives in `docs/ACCEPTANCE_TEST_MATRIX.md`. It
+exercises the running FastAPI + PostgreSQL + Redis + Soketi stack and separates
+automatable API flows from Google OAuth, realtime-client, and Android checks.
+
+```bash
+export ACCEPTANCE_BASE_URL=http://localhost:8000
+export ACCEPTANCE_ADMIN_EMAIL=...
+export ACCEPTANCE_ADMIN_PASSWORD=...
+export ACCEPTANCE_PLATFORM_ADMIN_EMAIL=...
+export ACCEPTANCE_PLATFORM_ADMIN_PASSWORD=...
+export ACCEPTANCE_RUN_ID=$(date +%Y%m%d%H%M%S)
+pytest tests/acceptance/ -v -m acceptance
+```
+
+For the release gate, use a dedicated acceptance/staging database. Do not run
+this suite against production data.
 
 ## Project layout
 
