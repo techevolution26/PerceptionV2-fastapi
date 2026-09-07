@@ -42,7 +42,37 @@ def bootstrap_api() -> Iterator[httpx.Client]:
         yield client
 
 
-def register_actor(api: httpx.Client, *, name: str, email: str) -> Actor:
+def _actor_from_response(name: str, email: str, response: httpx.Response) -> Actor:
+    if not response.is_success:
+        pytest.fail(
+            f"Acceptance actor registration failed for {email}: "
+            f"HTTP {response.status_code} {response.text[:1000]}"
+        )
+    body = response.json()
+    return Actor(
+        name=name,
+        email=email,
+        password="Acceptance9!Gate",
+        token=body["token"],
+        user_id=body["user"]["id"],
+    )
+
+
+async def register_actor(api: httpx.AsyncClient, *, name: str, email: str) -> Actor:
+    password = "Acceptance9!Gate"
+    response = await api.post(
+        "/api/register",
+        json={
+            "name": name,
+            "email": email,
+            "password": password,
+            "password_confirmation": password,
+        },
+    )
+    return _actor_from_response(name, email, response)
+
+
+def register_actor_sync(api: httpx.Client, *, name: str, email: str) -> Actor:
     password = "Acceptance9!Gate"
     response = api.post(
         "/api/register",
@@ -53,15 +83,7 @@ def register_actor(api: httpx.Client, *, name: str, email: str) -> Actor:
             "password_confirmation": password,
         },
     )
-    response.raise_for_status()
-    body = response.json()
-    return Actor(
-        name=name,
-        email=email,
-        password=password,
-        token=body["token"],
-        user_id=body["user"]["id"],
-    )
+    return _actor_from_response(name, email, response)
 
 
 @pytest.fixture(scope="session")
@@ -69,9 +91,9 @@ def actors(bootstrap_api: httpx.Client) -> dict[str, Actor]:
     """Create acceptance actors once using the synchronous bootstrap client."""
     suffix = os.getenv("ACCEPTANCE_RUN_ID", "release-gate")
     return {
-        "alice": register_actor(bootstrap_api, name="Acceptance Alice", email=f"acceptance-alice+{suffix}@example.com"),
-        "bob": register_actor(bootstrap_api, name="Acceptance Bob", email=f"acceptance-bob+{suffix}@example.com"),
-        "charlie": register_actor(bootstrap_api, name="Acceptance Charlie", email=f"acceptance-charlie+{suffix}@example.com"),
+        "alice": register_actor_sync(bootstrap_api, name="Acceptance Alice", email=f"acceptance-alice+{suffix}@example.com"),
+        "bob": register_actor_sync(bootstrap_api, name="Acceptance Bob", email=f"acceptance-bob+{suffix}@example.com"),
+        "charlie": register_actor_sync(bootstrap_api, name="Acceptance Charlie", email=f"acceptance-charlie+{suffix}@example.com"),
     }
 
 
@@ -95,7 +117,11 @@ def admin_token(bootstrap_api: httpx.Client) -> str:
     if not ADMIN_EMAIL or not ADMIN_PASSWORD:
         pytest.skip("Set ACCEPTANCE_ADMIN_EMAIL and ACCEPTANCE_ADMIN_PASSWORD for admin release-gate tests.")
     login = bootstrap_api.post("/api/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
-    login.raise_for_status()
+    if not login.is_success:
+        pytest.fail(
+            f"SUPER_ADMIN acceptance login failed: HTTP {login.status_code} "
+            f"{login.text[:1000]}"
+        )
     login_body = login.json()
     user = login_body["user"]
     if user["role"] != "SUPER_ADMIN":
@@ -105,7 +131,11 @@ def admin_token(bootstrap_api: httpx.Client) -> str:
         headers={"Authorization": f"Bearer {login_body['token']}"},
         json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
     )
-    session.raise_for_status()
+    if not session.is_success:
+        pytest.fail(
+            f"SUPER_ADMIN session reauthentication failed: HTTP {session.status_code} "
+            f"{session.text[:1000]}"
+        )
     return session.json()["token"]
 
 

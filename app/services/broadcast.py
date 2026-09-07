@@ -16,6 +16,8 @@ expects them:
     Laravel-specific `laravel-echo` sugar that this backend doesn't produce).
   - Messages: public channel `conversations.{peer_id}`, event `NewMessage`.
 """
+import hashlib
+import hmac
 import logging
 
 import pusher
@@ -64,7 +66,17 @@ def broadcast_message_update(peer_id: int, message: dict) -> None:
     _safe_trigger(f"conversations.{peer_id}", "MessageUpdated", {"message": message})
 
 
-def authenticate_channel(channel_name: str, socket_id: str) -> dict:
-    """Implements Pusher's private-channel auth handshake so
-    POST /api/broadcasting/auth can authorize a subscription."""
-    return _client.authenticate(channel=channel_name, socket_id=socket_id)
+def authenticate_channel(channel_name: str, socket_id: str) -> dict[str, str]:
+    """Generate the Pusher private-channel auth signature locally.
+
+    Private-channel authentication is a deterministic HMAC operation; it does
+    not require a network round-trip to soketi. Keeping this local also makes
+    the authorization endpoint independent of soketi availability.
+    """
+    string_to_sign = f"{socket_id}:{channel_name}"
+    signature = hmac.new(
+        settings.PUSHER_APP_SECRET.encode("utf-8"),
+        string_to_sign.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return {"auth": f"{settings.PUSHER_APP_KEY}:{signature}"}
