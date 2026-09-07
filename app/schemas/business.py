@@ -118,6 +118,8 @@ class AnalyticsOpportunityOut(BaseModel):
     evidence_level: str
 
 
+
+
 class AnalyticsRelationshipOut(BaseModel):
     topic_a_id: int
     topic_a_name: str
@@ -137,7 +139,6 @@ class AnalyticsGeoTopicOut(BaseModel):
     share_of_topic: float
     signal_score: float
     evidence_level: str
-
 
 class AnalyticsOverviewOut(BaseModel):
     period_days: int
@@ -196,6 +197,10 @@ class PerceptionAnalyticsOut(BaseModel):
     unique_participants: int
     engagement_rate: float
     daily_activity: list[dict]
+    audience_breakdown_minimum: int = 5
+    audience_breakdown_available: bool = False
     top_countries: list[dict]
+    top_regions: list[dict]
     top_professional_roles: list[dict]
+    top_verified_professional_roles: list[dict]
     methodology: list[str]

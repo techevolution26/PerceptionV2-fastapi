@@ -839,12 +839,26 @@ async def perception_analytics(
         or 0
     )
     ids = set(
-        (await db.execute(select(Like.user_id).where(Like.perception_id == p.id)))
+        (
+            await db.execute(
+                select(Like.user_id).where(
+                    Like.perception_id == p.id,
+                    Like.created_at >= since,
+                )
+            )
+        )
         .scalars()
         .all()
     )
     ids.update(
-        (await db.execute(select(Comment.user_id).where(Comment.perception_id == p.id)))
+        (
+            await db.execute(
+                select(Comment.user_id).where(
+                    Comment.perception_id == p.id,
+                    Comment.created_at >= since,
+                )
+            )
+        )
         .scalars()
         .all()
     )
@@ -854,6 +868,7 @@ async def perception_analytics(
                 select(PerceptionInteraction.actor_user_id).where(
                     PerceptionInteraction.perception_id == p.id,
                     PerceptionInteraction.created_at >= since,
+                    PerceptionInteraction.actor_user_id.is_not(None),
                 )
             )
         )
@@ -875,32 +890,37 @@ async def perception_analytics(
         )
     ).all()
     participants = (
-        (await db.execute(select(User).where(User.id.in_(ids)))).scalars().all()
-        if ids
-        else []
-    )
+        await db.execute(select(User).where(User.id.in_(ids)))
+    ).scalars().all() if ids else []
 
     # Keep the first small-scope audience view intentionally aggregate-only.
     # Role/location claims are suppressed when the participant sample is too small.
     audience_minimum = 5
     country_counts: dict[str, int] = {}
+    region_counts: dict[str, int] = {}
     role_counts: dict[str, int] = {}
-    if len(participants) >= audience_minimum:
+    verified_role_counts: dict[str, int] = {}
+    audience_breakdown_available = len(participants) >= audience_minimum
+    if audience_breakdown_available:
         for participant in participants:
             country = (participant.country_code or "UNKNOWN").upper()
             country_counts[country] = country_counts.get(country, 0) + 1
+            region = (participant.region or "UNKNOWN").strip()
+            region_key = f"{country} · {region}" if region != "UNKNOWN" else country
+            region_counts[region_key] = region_counts.get(region_key, 0) + 1
             roles = participant.professional_roles or []
             if not roles and participant.profession:
                 roles = [participant.profession]
             for role_code in roles[:5]:
-                role_counts[str(role_code)] = role_counts.get(str(role_code), 0) + 1
+                code = str(role_code)
+                role_counts[code] = role_counts.get(code, 0) + 1
+                if code in (participant.verified_professional_roles or []):
+                    verified_role_counts[code] = verified_role_counts.get(code, 0) + 1
 
     # Role labels are resolved from the user's structured identity.
     role_label_by_code: dict[str, str] = {}
     for participant in participants:
-        for code, label in zip(
-            participant.professional_roles or [], participant.professional_role_labels
-        ):
+        for code, label in zip(participant.professional_roles or [], participant.professional_role_labels):
             role_label_by_code[str(code)] = label
 
     return PerceptionAnalyticsOut(
@@ -918,27 +938,31 @@ async def perception_analytics(
         unique_participants=len(ids),
         engagement_rate=round((likes + comments + shares) / views, 4) if views else 0.0,
         daily_activity=[{"date": str(d), "interactions": int(c)} for d, c in activity],
+        audience_breakdown_minimum=audience_minimum,
+        audience_breakdown_available=audience_breakdown_available,
         top_countries=[
             {"country_code": code, "participants": count}
-            for code, count in sorted(
-                country_counts.items(), key=lambda item: item[1], reverse=True
-            )[:10]
+            for code, count in sorted(country_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+        ],
+        top_regions=[
+            {"region": region, "participants": count}
+            for region, count in sorted(region_counts.items(), key=lambda item: item[1], reverse=True)[:10]
         ],
         top_professional_roles=[
-            {
-                "role_code": code,
-                "role_label": role_label_by_code.get(code, code),
-                "participants": count,
-            }
-            for code, count in sorted(
-                role_counts.items(), key=lambda item: item[1], reverse=True
-            )[:10]
+            {"role_code": code, "role_label": role_label_by_code.get(code, code), "participants": count}
+            for code, count in sorted(role_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+        ],
+        top_verified_professional_roles=[
+            {"role_code": code, "role_label": role_label_by_code.get(code, code), "participants": count}
+            for code, count in sorted(verified_role_counts.items(), key=lambda item: item[1], reverse=True)[:10]
         ],
         methodology=[
             "Observed interaction counts for this perception; not causal inference.",
             "Likes/comments use the selected period; VIEW/SHARE are deduplicated per participant per event type per day.",
             "Engagement rate = (likes + comments + shares) / views for the selected period; 0 when no views are observed.",
             "Audience geography and professional-role breakdowns count unique interacting participants, not raw events.",
+            "Region is reported only as an aggregate country-region label; individual cities are not exposed in this report.",
+            "Verified professional-role breakdowns include only roles the platform has confirmed for participating users.",
             "Audience breakdowns are suppressed below 5 unique participants to avoid over-interpreting very small groups.",
         ],
     )
