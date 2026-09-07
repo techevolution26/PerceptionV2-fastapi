@@ -70,6 +70,8 @@ async def login(payload: LoginRequest, request: Request, db: DbSession):
         raise HTTPException(
             422, {"errors": {"email": ["The provided credentials are incorrect."]}}
         )
+    if not user.is_active:
+        raise HTTPException(403, "This account is suspended.")
     return AuthResponse(
         user=user, token=create_access_token(user.id, token_version=user.token_version)
     )
