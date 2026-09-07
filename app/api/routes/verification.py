@@ -1,30 +1,13 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-
 from app.api.deps import AdminUser, CurrentUser, DbSession
-from app.models.models import AnalyticsTopic, Topic, User, VerificationApplication
+from app.models.models import AdminAuditLog, Topic, User, VerificationApplication
 from app.schemas.verification import VerificationApplicationCreate, VerificationApplicationOut
 from app.services.subscriptions import require_analytics_access
+from app.services.professional_taxonomy import ROLE_MAP, validate_identity_selection
 
 router = APIRouter(prefix="/verification", tags=["verification"])
 
-
-def badge_for(profession: str, focus: str, topic_name: str | None) -> str:
-    text = f"{profession} {focus} {topic_name or ''}".lower()
-    if "science" in text or "research" in text or "biology" in text or "chem" in text:
-        return "🔬"
-    if "math" in text or "statistics" in text:
-        return "∑"
-    if "business" in text or "finance" in text or "econom" in text:
-        return "📈"
-    if "education" in text or "teacher" in text or "academic" in text:
-        return "🎓"
-    if "technology" in text or "software" in text or "engineer" in text:
-        return "⌘"
-    if "health" in text or "medical" in text:
-        return "⚕"
-    return "✦"
 
 
 @router.get("/me", response_model=VerificationApplicationOut | None)
@@ -51,6 +34,15 @@ async def apply(
     if current_user.verification_status in {"PENDING", "VERIFIED"}:
         raise HTTPException(status_code=409, detail="You already have an active verification application.")
 
+    industry_codes = list(dict.fromkeys(payload.industry_codes))
+    role_codes = list(dict.fromkeys(payload.professional_role_codes))
+    try:
+        validate_identity_selection(industry_codes, role_codes, payload.primary_professional_role)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not role_codes:
+        raise HTTPException(status_code=422, detail="Select at least one professional role before applying for verification.")
+
     topic_ids = list(dict.fromkeys(payload.requested_topic_ids))
     if payload.primary_topic_id is not None and payload.primary_topic_id not in topic_ids:
         topic_ids.insert(0, payload.primary_topic_id)
@@ -74,10 +66,14 @@ async def apply(
             await db.execute(select(Topic.name).where(Topic.id == payload.primary_topic_id))
         ).scalar_one_or_none()
 
-    badge = badge_for(payload.profession, payload.focus, primary_name)
+    primary_role = payload.primary_professional_role or role_codes[0]
+    badge = ROLE_MAP[primary_role]["icon"]
 
     current_user.profession = payload.profession
     current_user.professional_focus = payload.focus
+    current_user.professional_industries = industry_codes
+    current_user.professional_roles = role_codes
+    current_user.primary_professional_role = primary_role
     current_user.primary_analytics_topic_id = payload.primary_topic_id
     current_user.analytics_specialties = topic_ids
     current_user.verification_status = "PENDING"
@@ -86,6 +82,9 @@ async def apply(
         VerificationApplication(
             user_id=current_user.id,
             profession=payload.profession,
+            industry_codes=industry_codes,
+            professional_role_codes=role_codes,
+            primary_professional_role=primary_role,
             focus=payload.focus,
             primary_topic_id=payload.primary_topic_id,
             requested_topic_ids=topic_ids,
@@ -135,6 +134,13 @@ async def admin_review_application(
     application.status = "APPROVED" if approved else "REJECTED"
     application.reviewer_note = reviewer_note
     user.verification_status = "VERIFIED" if approved else "REJECTED"
+    user.verified_professional_roles = list(application.professional_role_codes) if approved else []
+    db.add(AdminAuditLog(
+        actor_user_id=admin.id,
+        target_user_id=user.id,
+        action="professional_verification.approved" if approved else "professional_verification.rejected",
+        data={"application_id": application.id, "roles": application.professional_role_codes, "industries": application.industry_codes},
+    ))
     if approved:
         user.verification_badge = application.badge
     elif user.verification_badge:

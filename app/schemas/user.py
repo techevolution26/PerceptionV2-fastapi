@@ -16,12 +16,17 @@ class UserPublic(BaseModel):
     profession: str | None = None
     verification_status: str = "NOT_APPLIED"
     verification_badge: str | None = None
+    professional_industries: list[str] = Field(default_factory=list)
+    professional_roles: list[str] = Field(default_factory=list)
+    primary_professional_role: str | None = None
+    primary_professional_role_label: str | None = None
+    professional_role_labels: list[str] = Field(default_factory=list)
+    verified_professional_roles: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
 class UserProfile(UserPublic):
     """Public profile + engagement counts; never exposes account credentials."""
-
     perceptions_count: int = 0
     followers_count: int = 0
     following_count: int = 0
@@ -71,22 +76,14 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, value: str) -> str:
-        if (
-            not any(c.isupper() for c in value)
-            or not any(c.islower() for c in value)
-            or not any(c.isdigit() for c in value)
-            or not any(not c.isalnum() for c in value)
-        ):
-            raise ValueError(
-                "Password must contain uppercase, lowercase, number, and special character."
-            )
+        if not any(c.isupper() for c in value) or not any(c.islower() for c in value) or not any(c.isdigit() for c in value) or not any(not c.isalnum() for c in value):
+            raise ValueError("Password must contain uppercase, lowercase, number, and special character.")
         return value
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-
 
 class GoogleLoginRequest(BaseModel):
     id_token: str = Field(min_length=20, max_length=8192)
@@ -108,3 +105,6 @@ class UpdateMeRequest(BaseModel):
     city: str | None = None
     primary_analytics_topic_id: int | None = None
     analytics_specialties: list[int] | None = None
+    professional_industries: list[str] | None = Field(default=None, max_length=20)
+    professional_roles: list[str] | None = Field(default=None, max_length=20)
+    primary_professional_role: str | None = Field(default=None, max_length=128)

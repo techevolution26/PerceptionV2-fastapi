@@ -19,13 +19,7 @@ router = APIRouter(tags=["auth"])
 settings = get_settings()
 
 
-async def _rate_limit(
-    request: Request,
-    *,
-    bucket: str = "login",
-    identity: str | None = None,
-    limit: int | None = None,
-):
+async def _rate_limit(request: Request, *, bucket: str = "login", identity: str | None = None, limit: int | None = None):
     """Redis-backed fixed-window limiter. In production, Redis failure fails closed."""
     key_identity = identity or (request.client.host if request.client else "unknown")
     digest = hashlib.sha256(key_identity.strip().lower().encode()).hexdigest()
@@ -46,12 +40,7 @@ async def _rate_limit(
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
 async def register(payload: RegisterRequest, request: Request, db: DbSession):
-    await _rate_limit(
-        request,
-        bucket="register",
-        identity=f"ip:{request.client.host if request.client else 'unknown'}",
-        limit=5,
-    )
+    await _rate_limit(request, bucket="register", identity=f"ip:{request.client.host if request.client else 'unknown'}", limit=5)
     if payload.password != payload.password_confirmation:
         raise HTTPException(
             422, {"errors": {"password": ["The password confirmation does not match."]}}
@@ -61,9 +50,7 @@ async def register(payload: RegisterRequest, request: Request, db: DbSession):
             422,
             {"errors": {"password": ["The password must be at least 8 characters."]}},
         )
-    if await db.scalar(
-        select(User.id).where(User.email == str(payload.email).lower().strip())
-    ):
+    if await db.scalar(select(User.id).where(User.email == str(payload.email).lower().strip())):
         raise HTTPException(
             422, {"errors": {"email": ["The email has already been taken."]}}
         )
@@ -85,16 +72,10 @@ async def register(payload: RegisterRequest, request: Request, db: DbSession):
 @router.post("/login", response_model=AuthResponse)
 async def login(payload: LoginRequest, request: Request, db: DbSession):
     normalized_email = str(payload.email).lower().strip()
-    await _rate_limit(
-        request, identity=f"ip:{request.client.host if request.client else 'unknown'}"
-    )
+    await _rate_limit(request, identity=f"ip:{request.client.host if request.client else 'unknown'}")
     await _rate_limit(request, bucket="login-account", identity=normalized_email)
     user = await db.scalar(select(User).where(User.email == normalized_email))
-    if (
-        user is None
-        or user.password_hash is None
-        or not verify_password(payload.password, user.password_hash)
-    ):
+    if user is None or user.password_hash is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             422, {"errors": {"email": ["The provided credentials are incorrect."]}}
         )
@@ -169,12 +150,7 @@ async def logout(current_user: CurrentUser, db: DbSession):
 async def admin_session(
     payload: LoginRequest, request: Request, current_user: CurrentUser, db: DbSession
 ):
-    await _rate_limit(
-        request,
-        bucket="admin-session",
-        identity=f"user:{current_user.id}",
-        limit=settings.ADMIN_SESSION_RATE_LIMIT_PER_MINUTE,
-    )
+    await _rate_limit(request, bucket="admin-session", identity=f"user:{current_user.id}", limit=settings.ADMIN_SESSION_RATE_LIMIT_PER_MINUTE)
     if (
         current_user.role != "SUPER_ADMIN"
         or payload.email.lower() != current_user.email.lower()

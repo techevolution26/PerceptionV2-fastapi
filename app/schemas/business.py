@@ -180,6 +180,9 @@ class AnalyticsProfileUpdate(BaseModel):
     city: str | None = None
     primary_analytics_topic_id: int | None = None
     analytics_specialties: list[int] = Field(default_factory=list, max_length=100)
+    professional_industries: list[str] = Field(default_factory=list, max_length=20)
+    professional_roles: list[str] = Field(default_factory=list, max_length=20)
+    primary_professional_role: str | None = Field(default=None, max_length=128)
 
 
 class PerceptionAnalyticsOut(BaseModel):

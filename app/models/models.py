@@ -57,6 +57,10 @@ class User(TimestampMixin, Base):
     analytics_specialties: Mapped[list] = mapped_column(
         JSON, default=list, nullable=False
     )
+    professional_industries: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    professional_roles: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    primary_professional_role: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    verified_professional_roles: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     primary_analytics_topic_id: Mapped[int | None] = mapped_column(
         ForeignKey("topics.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -73,6 +77,19 @@ class User(TimestampMixin, Base):
     )
     token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    @property
+    def primary_professional_role_label(self) -> str | None:
+        if not self.primary_professional_role:
+            return None
+        from app.services.professional_taxonomy import ROLE_MAP
+        role = ROLE_MAP.get(self.primary_professional_role)
+        return role["label"] if role else self.profession
+
+    @property
+    def professional_role_labels(self) -> list[str]:
+        from app.services.professional_taxonomy import ROLE_MAP
+        return [ROLE_MAP[code]["label"] for code in (self.professional_roles or []) if code in ROLE_MAP]
 
     perceptions: Mapped[list["Perception"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
@@ -409,6 +426,9 @@ class VerificationApplication(Base):
     )
     profession: Mapped[str] = mapped_column(String(255))
     focus: Mapped[str] = mapped_column(String(255))
+    industry_codes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    professional_role_codes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    primary_professional_role: Mapped[str | None] = mapped_column(String(128), nullable=True)
     primary_topic_id: Mapped[int | None] = mapped_column(
         ForeignKey("topics.id", ondelete="SET NULL"), nullable=True
     )

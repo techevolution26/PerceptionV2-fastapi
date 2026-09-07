@@ -10,6 +10,7 @@ from app.schemas.business import AnalyticsProfileUpdate
 from app.schemas.user import UpdateMeRequest, UserMe, UserProfile, UserSlim
 from app.services.storage import ALLOWED_IMAGE_TYPES, save_upload
 from app.services.notifications import notify
+from app.services.professional_taxonomy import INDUSTRIES, ROLES, validate_identity_selection, ROLE_MAP
 
 router = APIRouter(tags=["users"])
 
@@ -35,6 +36,11 @@ async def _profile_counts(db: DbSession, user_id: int) -> dict[str, int]:
     }
 
 
+
+@router.get("/professional-taxonomy")
+async def professional_taxonomy():
+    return {"industries": INDUSTRIES, "roles": ROLES}
+
 @router.get("/user", response_model=UserMe)
 async def get_me(current_user: CurrentUser):
     return current_user
@@ -42,6 +48,19 @@ async def get_me(current_user: CurrentUser):
 
 @router.put("/user", response_model=UserMe)
 async def update_me(payload: UpdateMeRequest, current_user: CurrentUser, db: DbSession):
+    if payload.professional_industries is not None or payload.professional_roles is not None or payload.primary_professional_role is not None:
+        industries = payload.professional_industries if payload.professional_industries is not None else list(current_user.professional_industries or [])
+        roles = payload.professional_roles if payload.professional_roles is not None else list(current_user.professional_roles or [])
+        primary_role = payload.primary_professional_role if payload.primary_professional_role is not None else current_user.primary_professional_role
+        try:
+            validate_identity_selection(industries, roles, primary_role)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        current_user.professional_industries = list(dict.fromkeys(industries))
+        current_user.professional_roles = list(dict.fromkeys(roles))
+        current_user.primary_professional_role = primary_role
+        if primary_role and not current_user.profession:
+            current_user.profession = ROLE_MAP[primary_role]["label"]
     if payload.name is not None:
         current_user.name = payload.name
     if payload.bio is not None:
@@ -68,7 +87,17 @@ async def update_analytics_profile(
         if len(valid_ids) != len(topic_ids):
             raise HTTPException(status_code=422, detail="One or more analytics topics are invalid.")
 
+    try:
+        validate_identity_selection(payload.professional_industries, payload.professional_roles, payload.primary_professional_role)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     current_user.professional_focus = payload.professional_focus
+    current_user.professional_industries = list(dict.fromkeys(payload.professional_industries))
+    current_user.professional_roles = list(dict.fromkeys(payload.professional_roles))
+    current_user.primary_professional_role = payload.primary_professional_role
+    if payload.primary_professional_role:
+        current_user.profession = ROLE_MAP[payload.primary_professional_role]["label"]
     current_user.country_code = payload.country_code.upper() if payload.country_code else None
     current_user.region = payload.region
     current_user.city = payload.city
