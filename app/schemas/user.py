@@ -49,7 +49,7 @@ class UserMe(UserPublic):
 
 
 class UserSlim(BaseModel):
-    """Minimal embed used inside perceptions/comments."""
+    """Minimal embed used inside perceptions/comments, including professional identity."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -59,6 +59,12 @@ class UserSlim(BaseModel):
     profession: str | None = None
     verification_status: str = "NOT_APPLIED"
     verification_badge: str | None = None
+    professional_industries: list[str] = Field(default_factory=list)
+    professional_roles: list[str] = Field(default_factory=list)
+    primary_professional_role: str | None = None
+    primary_professional_role_label: str | None = None
+    professional_role_labels: list[str] = Field(default_factory=list)
+    verified_professional_roles: list[str] = Field(default_factory=list)
 
 
 class UserWithUnread(UserSlim):
@@ -108,3 +114,43 @@ class UpdateMeRequest(BaseModel):
     professional_industries: list[str] | None = Field(default=None, max_length=20)
     professional_roles: list[str] | None = Field(default=None, max_length=20)
     primary_professional_role: str | None = Field(default=None, max_length=128)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=256)
+    password: str = Field(min_length=8, max_length=128)
+    password_confirmation: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if (
+            not any(c.isupper() for c in value)
+            or not any(c.islower() for c in value)
+            or not any(c.isdigit() for c in value)
+            or not any(not c.isalnum() for c in value)
+        ):
+            raise ValueError("Password must contain uppercase, lowercase, number, and special character.")
+        return value
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
+    password_confirmation: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if (
+            not any(c.isupper() for c in value)
+            or not any(c.islower() for c in value)
+            or not any(c.isdigit() for c in value)
+            or not any(not c.isalnum() for c in value)
+        ):
+            raise ValueError("Password must contain uppercase, lowercase, number, and special character.")
+        return value

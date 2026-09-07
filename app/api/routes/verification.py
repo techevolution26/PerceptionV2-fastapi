@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
-from app.api.deps import AdminUser, CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, SuperAdminUser
 from app.models.models import AdminAuditLog, Topic, User, VerificationApplication
 from app.schemas.verification import VerificationApplicationCreate, VerificationApplicationOut
 from app.services.subscriptions import require_analytics_access
@@ -105,7 +105,7 @@ async def apply(
 
 
 @router.get("/admin/applications", response_model=list[VerificationApplicationOut])
-async def admin_list_applications(admin: AdminUser, db: DbSession):
+async def admin_list_applications(admin: SuperAdminUser, db: DbSession):
     result = await db.execute(
         select(VerificationApplication)
         .order_by(VerificationApplication.created_at.desc())
@@ -118,7 +118,7 @@ async def admin_review_application(
     application_id: int,
     approved: bool,
     reviewer_note: str | None,
-    admin: AdminUser,
+    admin: SuperAdminUser,
     db: DbSession,
 ):
     result = await db.execute(

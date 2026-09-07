@@ -18,6 +18,7 @@ from sqlalchemy import delete, select
 
 from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
+from app.services.professional_taxonomy import ROLE_MAP
 from app.models.models import (
     AnalyticsTopic,
     Comment,
@@ -193,6 +194,17 @@ async def seed_demo() -> None:
         # Users
         # ------------------------------------------------------------------
         users: list[User] = []
+        # Structured demo identities keep the seeded dataset aligned with the
+        # professional taxonomy used by the verification and profile UI.
+        demo_role_codes = [
+            "product_manager", "software_engineer", "teacher", "business_analyst",
+            "public_health_specialist", "research_scientist", "economist", "entrepreneur",
+            "ux_designer", "data_scientist", "journalist", "agricultural_economist",
+            "nurse", "web_developer", "lecturer", "founder", "social_worker",
+            "financial_advisor", "research_scientist", "coach", "management_consultant",
+            "cybersecurity_specialist", "policy_analyst", "operations_manager", "psychologist",
+            "architect", "human_resources_specialist", "teacher", "management_consultant", "farmer",
+        ]
         primary_topics = [
             "Business",
             "Technology",
@@ -222,6 +234,9 @@ async def seed_demo() -> None:
 
             specialties = [topics[name].id for name in specialty_names]
 
+            role_code = demo_role_codes[index - 1]
+            role_definition = ROLE_MAP[role_code]
+            verified = index <= 12
             user = User(
                 name=name,
                 role="USER",
@@ -229,13 +244,17 @@ async def seed_demo() -> None:
                 password_hash=hash_password(DEMO_PASSWORD),
                 profession=profession,
                 professional_focus=focus,
+                professional_industries=[role_definition["industry_code"]],
+                professional_roles=[role_code],
+                primary_professional_role=role_code,
+                verified_professional_roles=[role_code] if verified else [],
                 country_code=country_code,
                 region=region,
                 city=city,
                 analytics_specialties=specialties,
                 primary_analytics_topic_id=primary_topic.id if primary_topic else None,
-                verification_status="VERIFIED" if index <= 12 else "NOT_APPLIED",
-                verification_badge="PROFESSIONAL" if index <= 12 else None,
+                verification_status="VERIFIED" if verified else "NOT_APPLIED",
+                verification_badge="PROFESSIONAL" if verified else None,
                 bio=f"Demo participant interested in {focus.lower()}.",
             )
             users.append(user)
@@ -301,6 +320,9 @@ async def seed_demo() -> None:
                         VerificationApplication(
                             user_id=user.id,
                             profession=user.profession or "Professional",
+                            industry_codes=list(user.professional_industries or []),
+                            professional_role_codes=list(user.professional_roles or []),
+                            primary_professional_role=user.primary_professional_role,
                             focus=user.professional_focus or "General research",
                             primary_topic_id=user.primary_analytics_topic_id,
                             requested_topic_ids=[

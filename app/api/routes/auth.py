@@ -1,18 +1,25 @@
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from redis.asyncio import Redis
+from datetime import datetime, timedelta, timezone
+import secrets
+
 import hashlib
 from app.api.deps import CurrentUser, DbSession
 from app.core.config import get_settings
 from app.core.security import create_access_token, hash_password, verify_password
-from app.models.models import User
+from app.services.email import send_password_reset_email
+from app.models.models import PasswordResetToken, User
 from app.schemas.user import (
     AuthResponse,
     GoogleLoginRequest,
     LoginRequest,
     RegisterRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    ChangePasswordRequest,
 )
 
 router = APIRouter(tags=["auth"])
@@ -167,3 +174,109 @@ async def admin_session(
         ),
         "expires_in": settings.ADMIN_SESSION_EXPIRE_MINUTES * 60,
     }
+
+
+@router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: DbSession,
+):
+    """Start recovery without revealing whether an email is registered."""
+    normalized_email = str(payload.email).lower().strip()
+    await _rate_limit(
+        request,
+        bucket="password-reset-ip",
+        identity=f"ip:{request.client.host if request.client else 'unknown'}",
+        limit=settings.PASSWORD_RESET_RATE_LIMIT_PER_MINUTE,
+    )
+    await _rate_limit(
+        request,
+        bucket="password-reset-account",
+        identity=normalized_email,
+        limit=settings.PASSWORD_RESET_RATE_LIMIT_PER_MINUTE,
+    )
+
+    user = await db.scalar(select(User).where(User.email == normalized_email, User.is_active.is_(True)))
+    # Keep the response identical whether the account exists or not.
+    if user is not None:
+        await db.execute(
+            delete(PasswordResetToken).where(
+                (PasswordResetToken.user_id == user.id)
+                | (PasswordResetToken.expires_at < datetime.now(timezone.utc))
+            )
+        )
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        reset_token = PasswordResetToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES),
+            requested_ip=request.client.host if request.client else None,
+        )
+        db.add(reset_token)
+        await db.commit()
+        reset_url = f"{settings.PASSWORD_RESET_URL}?token={raw_token}"
+        background_tasks.add_task(
+            send_password_reset_email,
+            recipient=user.email,
+            reset_url=reset_url,
+        )
+    else:
+        await db.rollback()
+
+    return {"message": "If an account exists for that email, password-reset instructions have been sent."}
+
+
+@router.post("/reset-password")
+async def reset_password(payload: ResetPasswordRequest, db: DbSession):
+    if payload.password != payload.password_confirmation:
+        raise HTTPException(422, {"errors": {"password": ["The password confirmation does not match."]}})
+
+    token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    token = await db.scalar(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == token_hash,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.expires_at > now,
+        ).with_for_update()
+    )
+    if token is None:
+        raise HTTPException(400, "This password-reset link is invalid or has expired.")
+
+    user = await db.scalar(select(User).where(User.id == token.user_id, User.is_active.is_(True)))
+    if user is None:
+        raise HTTPException(400, "This password-reset link is invalid or has expired.")
+
+    user.password_hash = hash_password(payload.password)
+    user.token_version += 1
+    token.used_at = now
+    # One successful reset invalidates every other outstanding reset link.
+    await db.execute(
+        delete(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.id != token.id,
+        )
+    )
+    await db.commit()
+    return {"message": "Your password has been reset. Please sign in again."}
+
+
+@router.post("/change-password")
+async def change_password(payload: ChangePasswordRequest, current_user: CurrentUser, db: DbSession):
+    if current_user.password_hash is None:
+        raise HTTPException(409, "This account does not have a password yet. Use password recovery to set one.")
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(422, {"errors": {"current_password": ["The current password is incorrect."]}})
+    if payload.password != payload.password_confirmation:
+        raise HTTPException(422, {"errors": {"password": ["The password confirmation does not match."]}})
+    if verify_password(payload.password, current_user.password_hash):
+        raise HTTPException(422, {"errors": {"password": ["Choose a different password."]}})
+
+    current_user.password_hash = hash_password(payload.password)
+    current_user.token_version += 1
+    await db.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == current_user.id))
+    await db.commit()
+    return {"message": "Your password has been changed. Please sign in again."}

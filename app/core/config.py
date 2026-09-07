@@ -37,6 +37,16 @@ class Settings(BaseSettings):
     )
     LOGIN_RATE_LIMIT_PER_MINUTE: int = 8
     ADMIN_SESSION_RATE_LIMIT_PER_MINUTE: int = 5
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 30
+    PASSWORD_RESET_RATE_LIMIT_PER_MINUTE: int = 5
+    PASSWORD_RESET_URL: str = "http://localhost:3000/reset-password"
+    MAIL_FROM: str = "no-reply@perception.local"
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False
     RATE_LIMIT_FAIL_OPEN: bool = False
 
     @model_validator(mode="after")
@@ -50,6 +60,10 @@ class Settings(BaseSettings):
                 raise ValueError("RATE_LIMIT_FAIL_OPEN must be false in production")
             if not self.cors_origins_list:
                 raise ValueError("CORS_ORIGINS must contain at least one origin in production")
+            if not self.SMTP_HOST or not self.MAIL_FROM:
+                raise ValueError("SMTP_HOST and MAIL_FROM are required in production for account recovery")
+            if not self.PASSWORD_RESET_URL.startswith(("https://", "perception://")):
+                raise ValueError("PASSWORD_RESET_URL must use https:// or perception:// in production")
         return self
 
     # --- Database ---
