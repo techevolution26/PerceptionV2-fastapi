@@ -4,7 +4,6 @@ This module intentionally contains no LLM/provider integration. It defines the
 normalized result shape that a future analysis worker can write and the
 aggregate shape that the Perception intelligence API can safely expose.
 """
-
 from __future__ import annotations
 
 from collections import Counter
@@ -14,7 +13,7 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Comment, CommentIntelligence
+from app.models.models import Comment, CommentIntelligence, User
 
 SEMANTIC_SAMPLE_MINIMUM = 5
 ALLOWED_SENTIMENTS = {"positive", "negative", "neutral", "mixed", "unclear"}
@@ -93,9 +92,7 @@ async def upsert_comment_intelligence(
     _validate_analysis_payload(
         sentiment=sentiment, stance=stance, quality_score=quality_score
     )
-    clean_themes = [
-        str(theme).strip() for theme in (themes or []) if str(theme).strip()
-    ]
+    clean_themes = [str(theme).strip() for theme in (themes or []) if str(theme).strip()]
     clean_themes = list(dict.fromkeys(clean_themes))[:10]
 
     existing = await db.scalar(
@@ -140,6 +137,27 @@ async def get_comment_intelligence_rows(
     return list(result.scalars().all())
 
 
+async def get_comment_intelligence_participant_rows(
+    db: AsyncSession,
+    perception_id: int,
+    since: datetime,
+) -> list[tuple[CommentIntelligence, User]]:
+    """Return analyzed comments with participant attributes for cohort aggregation."""
+    result = await db.execute(
+        select(CommentIntelligence, User)
+        .join(Comment, Comment.id == CommentIntelligence.comment_id)
+        .join(User, User.id == Comment.user_id)
+        .where(
+            Comment.perception_id == perception_id,
+            Comment.created_at >= since,
+            CommentIntelligence.status == "analyzed",
+            User.is_active.is_(True),
+        )
+        .order_by(Comment.created_at.asc())
+    )
+    return list(result.all())
+
+
 def aggregate_comment_intelligence(
     rows: list[CommentIntelligence],
     *,
@@ -172,14 +190,12 @@ def aggregate_comment_intelligence(
             "disagreement_themes": [],
         }
 
-    quality_values = [
-        row.quality_score for row in rows if row.quality_score is not None
-    ]
-    quality = (
-        round(sum(quality_values) / len(quality_values), 3) if quality_values else None
-    )
+    quality_values = [row.quality_score for row in rows if row.quality_score is not None]
+    quality = round(sum(quality_values) / len(quality_values), 3) if quality_values else None
 
-    concern_themes = _theme_distribution([row for row in rows if row.has_concern])
+    concern_themes = _theme_distribution(
+        [row for row in rows if row.has_concern]
+    )
     agreement_themes = _theme_distribution(
         [row for row in rows if row.agreement_signal]
     )

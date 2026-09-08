@@ -54,29 +54,16 @@ class Settings(BaseSettings):
         if self.ENVIRONMENT == "production":
             if self.DEBUG:
                 raise ValueError("DEBUG must be false in production")
-            if (
-                len(self.SECRET_KEY) < 32
-                or self.SECRET_KEY == "change-me-in-prod-please-please-please"
-            ):
+            if len(self.SECRET_KEY) < 32 or self.SECRET_KEY == "change-me-in-prod-please-please-please":
                 raise ValueError("A strong SECRET_KEY is required in production")
             if self.RATE_LIMIT_FAIL_OPEN:
                 raise ValueError("RATE_LIMIT_FAIL_OPEN must be false in production")
             if not self.cors_origins_list:
-                raise ValueError(
-                    "CORS_ORIGINS must contain at least one origin in production"
-                )
+                raise ValueError("CORS_ORIGINS must contain at least one origin in production")
             if not self.SMTP_HOST or not self.MAIL_FROM:
-                raise ValueError(
-                    "SMTP_HOST and MAIL_FROM are required in production for account recovery"
-                )
+                raise ValueError("SMTP_HOST and MAIL_FROM are required in production for account recovery")
             if not self.PASSWORD_RESET_URL.startswith(("https://", "perception://")):
-                raise ValueError(
-                    "PASSWORD_RESET_URL must use https:// or perception:// in production"
-                )
-            if self.COMMENT_INTELLIGENCE_ENABLED and not self.OPENAI_API_KEY:
-                raise ValueError(
-                    "OPENAI_API_KEY is required when comment intelligence is enabled in production"
-                )
+                raise ValueError("PASSWORD_RESET_URL must use https:// or perception:// in production")
         return self
 
     # --- Database ---
@@ -126,15 +113,6 @@ class Settings(BaseSettings):
 
     # --- Networking tuning (East-Africa-aware, carried over from the Laravel config) ---
     UPSTREAM_TIMEOUT_SECONDS: float = 15.0
-
-    # --- Comment intelligence provider ---
-    COMMENT_INTELLIGENCE_ENABLED: bool = False
-    COMMENT_INTELLIGENCE_MODEL: str = "gpt-5.6-luna"
-    COMMENT_INTELLIGENCE_BATCH_SIZE: int = 10
-    COMMENT_INTELLIGENCE_INTERVAL_SECONDS: int = 60
-    COMMENT_INTELLIGENCE_COOLDOWN_MAX_SECONDS: int = 86400
-    OPENAI_API_KEY: str = ""
-    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
 
 
 @lru_cache

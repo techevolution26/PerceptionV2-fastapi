@@ -194,10 +194,10 @@ class PerceptionAnalyticsOut(BaseModel):
     author_verified: bool = False
     likes: int
     comments: int
-    views: int
-    shares: int
+    views: int | None
+    shares: int | None
     unique_participants: int
-    engagement_rate: float
+    engagement_rate: float | None
     daily_activity: list[dict]
     audience_breakdown_minimum: int = 5
     audience_breakdown_available: bool = False
@@ -218,4 +218,11 @@ class PerceptionAnalyticsOut(BaseModel):
     concern_themes: list[dict] = []
     agreement_themes: list[dict] = []
     disagreement_themes: list[dict] = []
+    cross_analysis_status: str = "insufficient_sample"
+    cross_analysis_note: str = "Professional and geographic semantic comparison is not yet available."
+    cross_analysis_sample_minimum: int = 5
+    cross_analysis_comment_count: int = 0
+    professional_semantic_segments: list[dict] = []
+    geographic_semantic_segments: list[dict] = []
+    professional_geographic_segments: list[dict] = []
     methodology: list[str]

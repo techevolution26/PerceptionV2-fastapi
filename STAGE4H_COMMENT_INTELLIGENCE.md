@@ -65,38 +65,15 @@ The aggregate is evidence metadata, not statistical confidence and not causal
 inference. A future worker may write results through the normalized service
 contract without changing the public analytics response shape.
 
-## Semantic analysis engine
+## Professional × geographic semantic cross-analysis
 
-The semantic layer now has an opt-in provider adapter and background worker.
-The current adapter uses the OpenAI Responses API with strict JSON Schema output.
-The worker sends only the perception text, topic name, and comment text needed
-for semantic classification; it does not send commenter identity or profile
-attributes. Provider responses are not persisted.
+The next intelligence layer compares stored semantic signals across aggregate
+participant cohorts. It does not run another model and does not expose people.
 
-Configuration:
-
-- `COMMENT_INTELLIGENCE_ENABLED=false` by default, to prevent accidental model spend.
-- `COMMENT_INTELLIGENCE_MODEL=gpt-5.6-luna` for the cost-sensitive high-volume path.
-- `COMMENT_INTELLIGENCE_BATCH_SIZE=10` comments per scheduled pass.
-- `COMMENT_INTELLIGENCE_INTERVAL_SECONDS=60` between passes.
-- `OPENAI_API_KEY` is required when the engine is enabled in production.
-- `OPENAI_BASE_URL` defaults to the OpenAI API and remains configurable for a compatible provider.
-
-New comments and replies are queued as `pending`. The scheduler processes a
-bounded batch and writes only the normalized `comment_intelligence` fields.
-Transient provider failures remain retryable; invalid or unsupported results are
-recorded as a safe failure code without storing raw provider output.
-
-The worker also backfills comments that predate Stage 4H by creating their
-normalized `pending` record on the next scheduled pass. This avoids requiring a
-new database migration just to enqueue historical comments.
-
-## Semantic worker hardening
-
-The semantic worker now validates provider output against the closed semantic contract before persistence. It rejects missing/extra fields, invalid labels, malformed themes, non-boolean flags, and non-finite/out-of-range quality scores.
-
-Provider failures are classified by operational behavior:
-- timeouts, transport failures, rate limits, and provider 5xx responses remain `pending` for retry;
-- authentication/configuration failures and malformed semantic output are recorded as terminal `failed` results with safe error codes.
-
-The worker continues to store normalized semantic output only. Raw provider responses and prompts are not persisted.
+- Professional cohorts use the participant's primary structured professional role.
+- Geographic cohorts use country and country-region; city is never exposed.
+- Professional + geographic cohorts combine those two dimensions.
+- Every cohort is independently suppressed unless it contains at least 5 analyzed comments.
+- Reported fields include sample size, sentiment distribution, stance distribution, top themes, question count, and mean analysis quality where available.
+- No causal, population-representative, or individual-level inference is made.
+- A comment is attributed to its comment author's cohort; raw participant identities are never returned by the analytics API.

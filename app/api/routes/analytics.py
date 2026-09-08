@@ -29,9 +29,13 @@ from app.schemas.business import (
     PerceptionAnalyticsOut,
 )
 from app.services.subscriptions import require_analytics_access
+from app.services.comment_cross_analysis import (
+    aggregate_professional_geographic_semantics,
+)
 from app.services.comment_intelligence import (
     SEMANTIC_SAMPLE_MINIMUM,
     aggregate_comment_intelligence,
+    get_comment_intelligence_participant_rows,
     get_comment_intelligence_rows,
 )
 
@@ -902,8 +906,10 @@ async def perception_analytics(
         )
     ).all()
     participants = (
-        await db.execute(select(User).where(User.id.in_(ids)))
-    ).scalars().all() if ids else []
+        (await db.execute(select(User).where(User.id.in_(ids)))).scalars().all()
+        if ids
+        else []
+    )
 
     # Keep the first small-scope audience view intentionally aggregate-only.
     # Role/location claims are suppressed when the participant sample is too small.
@@ -932,14 +938,24 @@ async def perception_analytics(
     # Role labels are resolved from the user's structured identity.
     role_label_by_code: dict[str, str] = {}
     for participant in participants:
-        for code, label in zip(participant.professional_roles or [], participant.professional_role_labels):
+        for code, label in zip(
+            participant.professional_roles or [], participant.professional_role_labels
+        ):
             role_label_by_code[str(code)] = label
 
     viewer_lens = "author" if is_author else "observer"
-    intelligence_scope = "creator_analytics" if is_author else "conversation_intelligence"
+    intelligence_scope = (
+        "creator_analytics" if is_author else "conversation_intelligence"
+    )
     semantic_rows = await get_comment_intelligence_rows(db, p.id, since)
     semantic = aggregate_comment_intelligence(
         semantic_rows, period_days=days, minimum=SEMANTIC_SAMPLE_MINIMUM
+    )
+    semantic_participant_rows = await get_comment_intelligence_participant_rows(
+        db, p.id, since
+    )
+    cross_analysis = aggregate_professional_geographic_semantics(
+        semantic_participant_rows, minimum=SEMANTIC_SAMPLE_MINIMUM
     )
     methodology = [
         "Audience counts are unique interacting participants during the selected period; individuals are not exposed.",
@@ -948,11 +964,18 @@ async def perception_analytics(
         "Professional-role results use user-declared structured identity and separately identify verified professional roles where available.",
         "Semantic signals are exposed only from stored analyzed-comment results; no labels are inferred from engagement counts.",
         f"Semantic interpretation is suppressed below {SEMANTIC_SAMPLE_MINIMUM} analyzed comments.",
+        f"Professional and geographic semantic cohorts are independently suppressed below {SEMANTIC_SAMPLE_MINIMUM} analyzed comments.",
     ]
     if is_author:
-        methodology.insert(0, "Creator analytics are available only to the author and require an analytics-enabled plan.")
+        methodology.insert(
+            0,
+            "Creator analytics are available only to the author and require an analytics-enabled plan.",
+        )
     else:
-        methodology.insert(0, "This observer view exposes conversation-level aggregates, not the author's private performance analytics.")
+        methodology.insert(
+            0,
+            "This observer view exposes conversation-level aggregates, not the author's private performance analytics.",
+        )
 
     return PerceptionAnalyticsOut(
         perception_id=p.id,
@@ -962,35 +985,65 @@ async def perception_analytics(
         created_at=p.created_at,
         topic_id=p.topic_id,
         topic_name=p.topic.name if p.topic else None,
-        author_professional_role=p.user.primary_professional_role_label or p.user.profession,
-        author_verified=(p.user.verification_status == "VERIFIED" and bool(p.user.verified_professional_roles)),
+        author_professional_role=p.user.primary_professional_role_label
+        or p.user.profession,
+        author_verified=(
+            p.user.verification_status == "VERIFIED"
+            and bool(p.user.verified_professional_roles)
+        ),
         likes=likes,
         comments=comments,
-        views=views,
-        shares=shares,
+        views=views if is_author else None,
+        shares=shares if is_author else None,
         unique_participants=len(ids),
-        engagement_rate=round((likes + comments + shares) / views, 4) if views else 0.0,
-        daily_activity=[{"date": str(d), "interactions": int(c)} for d, c in activity],
+        engagement_rate=(
+            (round((likes + comments + shares) / views, 4) if views else 0.0)
+            if is_author
+            else None
+        ),
+        daily_activity=(
+            [{"date": str(d), "interactions": int(c)} for d, c in activity]
+            if is_author
+            else []
+        ),
         audience_breakdown_minimum=audience_minimum,
         audience_breakdown_available=audience_breakdown_available,
         top_countries=[
             {"country_code": code, "participants": count}
-            for code, count in sorted(country_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+            for code, count in sorted(
+                country_counts.items(), key=lambda item: item[1], reverse=True
+            )[:10]
         ],
         top_regions=[
             {"region": region, "participants": count}
-            for region, count in sorted(region_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+            for region, count in sorted(
+                region_counts.items(), key=lambda item: item[1], reverse=True
+            )[:10]
         ],
         top_professional_roles=[
-            {"role_code": code, "role_label": role_label_by_code.get(code, code), "participants": count}
-            for code, count in sorted(role_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+            {
+                "role_code": code,
+                "role_label": role_label_by_code.get(code, code),
+                "participants": count,
+            }
+            for code, count in sorted(
+                role_counts.items(), key=lambda item: item[1], reverse=True
+            )[:10]
         ],
         top_verified_professional_roles=[
-            {"role_code": code, "role_label": role_label_by_code.get(code, code), "participants": count}
-            for code, count in sorted(verified_role_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+            {
+                "role_code": code,
+                "role_label": role_label_by_code.get(code, code),
+                "participants": count,
+            }
+            for code, count in sorted(
+                verified_role_counts.items(), key=lambda item: item[1], reverse=True
+            )[:10]
         ],
         **semantic,
-        methodology=methodology + [
+        **cross_analysis,
+        methodology=methodology
+        + [
             "Observed interaction counts for this perception; not causal inference.",
             "Likes/comments use the selected period; VIEW/SHARE are deduplicated per participant per event type per day.",
             "Engagement rate = (likes + comments + shares) / views for the selected period; 0 when no views are observed.",
