@@ -1,12 +1,15 @@
 from types import SimpleNamespace
 
 import pytest
+import httpx
 
 from app.services.comment_intelligence_provider import (
     ANALYSIS_SCHEMA,
     CommentIntelligenceProviderError,
     _extract_output_text,
     validate_analysis_result,
+    _cooldown_seconds,
+    _parse_duration,
 )
 
 
@@ -69,3 +72,18 @@ def test_validate_analysis_result_rejects_invalid_quality():
     with pytest.raises(CommentIntelligenceProviderError) as exc:  # noqa: PT011
         validate_analysis_result(result)
     assert exc.value.code == "invalid_provider_schema"
+
+
+def test_parse_provider_duration():
+    assert _parse_duration("1728") == 1728
+    assert _parse_duration("23h53m54.9s") == 86034
+
+
+def test_cooldown_prefers_request_reset_when_requests_are_exhausted():
+    request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    response = httpx.Response(429, request=request, headers={
+        "Retry-After": "1728",
+        "x-ratelimit-remaining-requests": "0",
+        "x-ratelimit-reset-requests": "23h53m54s",
+    })
+    assert _cooldown_seconds(response, maximum=86400) == 86034

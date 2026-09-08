@@ -49,14 +49,6 @@ class Settings(BaseSettings):
     SMTP_USE_SSL: bool = False
     RATE_LIMIT_FAIL_OPEN: bool = False
 
-    # --- Comment intelligence ---
-    COMMENT_INTELLIGENCE_ENABLED: bool = True
-    COMMENT_INTELLIGENCE_MODEL: str = "gpt-5.6-luna"
-    COMMENT_INTELLIGENCE_BATCH_SIZE: int = 10
-    COMMENT_INTELLIGENCE_INTERVAL_SECONDS: int = 60
-    OPENAI_API_KEY: str = ""
-    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
-
     @model_validator(mode="after")
     def validate_production_security(self):
         if self.ENVIRONMENT == "production":
@@ -134,6 +126,15 @@ class Settings(BaseSettings):
 
     # --- Networking tuning (East-Africa-aware, carried over from the Laravel config) ---
     UPSTREAM_TIMEOUT_SECONDS: float = 15.0
+
+    # --- Comment intelligence provider ---
+    COMMENT_INTELLIGENCE_ENABLED: bool = False
+    COMMENT_INTELLIGENCE_MODEL: str = "gpt-5.6-luna"
+    COMMENT_INTELLIGENCE_BATCH_SIZE: int = 10
+    COMMENT_INTELLIGENCE_INTERVAL_SECONDS: int = 60
+    COMMENT_INTELLIGENCE_COOLDOWN_MAX_SECONDS: int = 86400
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
 
 
 @lru_cache
