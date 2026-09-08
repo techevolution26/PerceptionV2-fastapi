@@ -90,3 +90,13 @@ recorded as a safe failure code without storing raw provider output.
 The worker also backfills comments that predate Stage 4H by creating their
 normalized `pending` record on the next scheduled pass. This avoids requiring a
 new database migration just to enqueue historical comments.
+
+## Semantic worker hardening
+
+The semantic worker now validates provider output against the closed semantic contract before persistence. It rejects missing/extra fields, invalid labels, malformed themes, non-boolean flags, and non-finite/out-of-range quality scores.
+
+Provider failures are classified by operational behavior:
+- timeouts, transport failures, rate limits, and provider 5xx responses remain `pending` for retry;
+- authentication/configuration failures and malformed semantic output are recorded as terminal `failed` results with safe error codes.
+
+The worker continues to store normalized semantic output only. Raw provider responses and prompts are not persisted.

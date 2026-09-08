@@ -298,7 +298,13 @@ async def process_pending_comment_intelligence() -> int:
                 )
                 processed += 1
             except CommentIntelligenceProviderError as exc:
-                if exc.code in {"provider_not_configured", "provider_timeout", "provider_request_error"}:
+                if exc.code in {
+                    "provider_not_configured",
+                    "provider_timeout",
+                    "provider_request_error",
+                    "provider_rate_limited",
+                    "provider_server_error",
+                }:
                     # Keep transient/configuration failures retryable.
                     logger.warning("Comment %s remains pending: %s", comment.id, exc.code)
                     continue
