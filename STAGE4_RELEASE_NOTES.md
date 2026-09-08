@@ -35,3 +35,10 @@ alembic upgrade head
 Migration: `0006_professional_identity_taxonomy`
 
 No existing profession data is deleted. Existing free-form values remain as legacy profile data until the user selects structured professional identities.
+
+## Stage 4H — Comment Intelligence Foundation
+
+- Perception analytics now distinguishes author `creator_analytics` from non-author `conversation_intelligence`.
+- Non-authors can open the analytics/intelligence surface without receiving the author's private analytics subscription gate.
+- Aggregate audience intelligence remains subject to the 5-participant suppression threshold and does not expose individual identities or cities.
+- Semantic analysis is explicitly marked unavailable until the comment-intelligence layer is implemented; no fabricated sentiment, stance, or theme results are shown.

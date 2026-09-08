@@ -29,6 +29,11 @@ from app.schemas.business import (
     PerceptionAnalyticsOut,
 )
 from app.services.subscriptions import require_analytics_access
+from app.services.comment_intelligence import (
+    SEMANTIC_SAMPLE_MINIMUM,
+    aggregate_comment_intelligence,
+    get_comment_intelligence_rows,
+)
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -792,15 +797,22 @@ async def analytics_opportunity_detail(
 async def perception_analytics(
     perception_id: int, current_user: CurrentUser, db: DbSession, days: int = 30
 ):
-    await require_analytics_access(db, current_user.id)
     days = max(7, min(days, 365))
     p = await db.scalar(
         select(Perception)
+        .join(User, User.id == Perception.user_id)
         .options(selectinload(Perception.user), selectinload(Perception.topic))
-        .where(Perception.id == perception_id, Perception.user_id == current_user.id)
+        .where(Perception.id == perception_id, User.is_active.is_(True))
     )
     if p is None:
         raise HTTPException(404, "Perception not found")
+
+    is_author = p.user_id == current_user.id
+    if is_author:
+        # Creator analytics remain subscription-gated. Public conversation
+        # intelligence is intentionally available without exposing creator-only
+        # analytics to other users.
+        await require_analytics_access(db, current_user.id)
     since = max(p.created_at, datetime.now(timezone.utc) - timedelta(days=days))
     likes = int(
         await db.scalar(
@@ -923,14 +935,35 @@ async def perception_analytics(
         for code, label in zip(participant.professional_roles or [], participant.professional_role_labels):
             role_label_by_code[str(code)] = label
 
+    viewer_lens = "author" if is_author else "observer"
+    intelligence_scope = "creator_analytics" if is_author else "conversation_intelligence"
+    semantic_rows = await get_comment_intelligence_rows(db, p.id, since)
+    semantic = aggregate_comment_intelligence(
+        semantic_rows, period_days=days, minimum=SEMANTIC_SAMPLE_MINIMUM
+    )
+    methodology = [
+        "Audience counts are unique interacting participants during the selected period; individuals are not exposed.",
+        f"Professional and geographic breakdowns are suppressed below {audience_minimum} unique participants.",
+        "Country and regional results describe participants represented in this Perception; they are not population-representative estimates.",
+        "Professional-role results use user-declared structured identity and separately identify verified professional roles where available.",
+        "Semantic signals are exposed only from stored analyzed-comment results; no labels are inferred from engagement counts.",
+        f"Semantic interpretation is suppressed below {SEMANTIC_SAMPLE_MINIMUM} analyzed comments.",
+    ]
+    if is_author:
+        methodology.insert(0, "Creator analytics are available only to the author and require an analytics-enabled plan.")
+    else:
+        methodology.insert(0, "This observer view exposes conversation-level aggregates, not the author's private performance analytics.")
+
     return PerceptionAnalyticsOut(
         perception_id=p.id,
+        viewer_lens=viewer_lens,
+        intelligence_scope=intelligence_scope,
         period_days=days,
         created_at=p.created_at,
         topic_id=p.topic_id,
         topic_name=p.topic.name if p.topic else None,
         author_professional_role=p.primary_professional_role_label or p.profession,
-        author_verified=p.verification_status == "VERIFIED",
+        author_verified=(p.verification_status == "VERIFIED" and bool(p.verified_professional_roles)),
         likes=likes,
         comments=comments,
         views=views,
@@ -956,7 +989,8 @@ async def perception_analytics(
             {"role_code": code, "role_label": role_label_by_code.get(code, code), "participants": count}
             for code, count in sorted(verified_role_counts.items(), key=lambda item: item[1], reverse=True)[:10]
         ],
-        methodology=[
+        **semantic,
+        methodology=methodology + [
             "Observed interaction counts for this perception; not causal inference.",
             "Likes/comments use the selected period; VIEW/SHARE are deduplicated per participant per event type per day.",
             "Engagement rate = (likes + comments + shares) / views for the selected period; 0 when no views are observed.",

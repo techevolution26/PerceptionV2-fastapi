@@ -199,6 +199,38 @@ class Comment(TimestampMixin, Base):
     )
 
 
+class CommentIntelligence(TimestampMixin, Base):
+    """Versioned semantic result for one comment.
+
+    The table stores analysis output, not raw prompts or provider-specific
+    payloads. A future worker can replace the result for a newer model version.
+    """
+
+    __tablename__ = "comment_intelligence"
+    __table_args__ = (
+        UniqueConstraint("comment_id", name="uq_comment_intelligence_comment"),
+        Index("ix_comment_intelligence_status", "status"),
+        Index("ix_comment_intelligence_model_version", "model_version"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    comment_id: Mapped[int] = mapped_column(
+        ForeignKey("comments.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    sentiment: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    stance: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    themes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    is_question: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    has_concern: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    agreement_signal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    disagreement_signal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    quality_score: Mapped[float | None] = mapped_column(nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 class Follow(Base):
     __tablename__ = "follows"
 

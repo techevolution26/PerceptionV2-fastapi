@@ -184,6 +184,8 @@ class AnalyticsProfileUpdate(BaseModel):
 
 class PerceptionAnalyticsOut(BaseModel):
     perception_id: int
+    viewer_lens: str
+    intelligence_scope: str
     period_days: int
     created_at: datetime
     topic_id: int | None
@@ -203,4 +205,17 @@ class PerceptionAnalyticsOut(BaseModel):
     top_regions: list[dict]
     top_professional_roles: list[dict]
     top_verified_professional_roles: list[dict]
+    semantic_analysis_status: str = "insufficient_sample"
+    semantic_analysis_note: str = "Semantic intelligence is withheld until enough comments have been analyzed."
+    semantic_sample_minimum: int = 5
+    analyzed_comment_count: int = 0
+    semantic_period_days: int = 30
+    semantic_quality_score: float | None = None
+    sentiment_distribution: list[dict] = []
+    stance_distribution: list[dict] = []
+    top_themes: list[dict] = []
+    question_count: int = 0
+    concern_themes: list[dict] = []
+    agreement_themes: list[dict] = []
+    disagreement_themes: list[dict] = []
     methodology: list[str]
