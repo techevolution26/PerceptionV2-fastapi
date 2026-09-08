@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import aliased, noload, selectinload
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.models import Comment, Perception, User
+from app.models.models import Comment, CommentIntelligence, Perception, User
 from app.schemas.content import CommentOut
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
 from app.services.notifications import notify
@@ -195,6 +195,8 @@ async def create_comment(
     )
 
     db.add(comment)
+    await db.flush()
+    db.add(CommentIntelligence(comment_id=comment.id, status="pending"))
 
     await db.commit()
 
@@ -306,6 +308,8 @@ async def create_reply(
     )
 
     db.add(reply)
+    await db.flush()
+    db.add(CommentIntelligence(comment_id=reply.id, status="pending"))
 
     await db.commit()
 

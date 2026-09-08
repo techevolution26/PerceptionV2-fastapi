@@ -64,3 +64,29 @@ size, analysis period and an average analysis-quality score.
 The aggregate is evidence metadata, not statistical confidence and not causal
 inference. A future worker may write results through the normalized service
 contract without changing the public analytics response shape.
+
+## Semantic analysis engine
+
+The semantic layer now has an opt-in provider adapter and background worker.
+The current adapter uses the OpenAI Responses API with strict JSON Schema output.
+The worker sends only the perception text, topic name, and comment text needed
+for semantic classification; it does not send commenter identity or profile
+attributes. Provider responses are not persisted.
+
+Configuration:
+
+- `COMMENT_INTELLIGENCE_ENABLED=false` by default, to prevent accidental model spend.
+- `COMMENT_INTELLIGENCE_MODEL=gpt-5.6-luna` for the cost-sensitive high-volume path.
+- `COMMENT_INTELLIGENCE_BATCH_SIZE=10` comments per scheduled pass.
+- `COMMENT_INTELLIGENCE_INTERVAL_SECONDS=60` between passes.
+- `OPENAI_API_KEY` is required when the engine is enabled in production.
+- `OPENAI_BASE_URL` defaults to the OpenAI API and remains configurable for a compatible provider.
+
+New comments and replies are queued as `pending`. The scheduler processes a
+bounded batch and writes only the normalized `comment_intelligence` fields.
+Transient provider failures remain retryable; invalid or unsupported results are
+recorded as a safe failure code without storing raw provider output.
+
+The worker also backfills comments that predate Stage 4H by creating their
+normalized `pending` record on the next scheduled pass. This avoids requiring a
+new database migration just to enqueue historical comments.

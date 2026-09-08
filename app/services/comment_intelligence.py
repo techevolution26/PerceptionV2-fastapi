@@ -13,7 +13,7 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Comment, CommentIntelligence
+from app.models.models import Comment, CommentIntelligence, Perception
 
 SEMANTIC_SAMPLE_MINIMUM = 5
 ALLOWED_SENTIMENTS = {"positive", "negative", "neutral", "mixed", "unclear"}
@@ -197,3 +197,121 @@ def aggregate_comment_intelligence(
         "agreement_themes": agreement_themes,
         "disagreement_themes": disagreement_themes,
     }
+
+
+async def process_pending_comment_intelligence() -> int:
+    """Analyze a bounded batch of pending text comments.
+
+    The worker stores only normalized semantic output. Provider failures are
+    represented by safe error codes; raw provider responses are never stored.
+    """
+    import logging
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.core.config import get_settings
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import Comment, CommentIntelligence, Perception
+    from app.services.comment_intelligence_provider import (
+        CommentIntelligenceProviderError,
+        analyze_comment,
+    )
+
+    settings = get_settings()
+    logger = logging.getLogger("comment_intelligence")
+    if not settings.COMMENT_INTELLIGENCE_ENABLED:
+        return 0
+    if not settings.OPENAI_API_KEY:
+        logger.warning("Comment intelligence enabled but OPENAI_API_KEY is not configured")
+        return 0
+
+    async with AsyncSessionLocal() as db:
+        batch_size = max(1, settings.COMMENT_INTELLIGENCE_BATCH_SIZE)
+
+        # Backfill comments created before the semantic layer existed.
+        missing_result = await db.execute(
+            select(Comment)
+            .outerjoin(CommentIntelligence, CommentIntelligence.comment_id == Comment.id)
+            .where(CommentIntelligence.id.is_(None))
+            .order_by(Comment.created_at.asc())
+            .limit(batch_size)
+        )
+        missing_comments = list(missing_result.scalars().all())
+        for missing_comment in missing_comments:
+            db.add(CommentIntelligence(comment_id=missing_comment.id, status="pending"))
+        if missing_comments:
+            await db.flush()
+
+        result = await db.execute(
+            select(Comment)
+            .join(CommentIntelligence, CommentIntelligence.comment_id == Comment.id)
+            .where(CommentIntelligence.status == "pending")
+            .options(selectinload(Comment.perception).selectinload(Perception.topic))
+            .order_by(Comment.created_at.asc())
+            .limit(batch_size)
+        )
+        comments = list(result.scalars().all())
+
+        processed = 0
+        for comment in comments:
+            intelligence = await db.scalar(
+                select(CommentIntelligence).where(CommentIntelligence.comment_id == comment.id)
+            )
+            if intelligence is None or intelligence.status != "pending":
+                continue
+
+            if not comment.body or not comment.body.strip():
+                intelligence.status = "failed"
+                intelligence.error_code = "no_text"
+                intelligence.model_version = settings.COMMENT_INTELLIGENCE_MODEL
+                processed += 1
+                continue
+
+            try:
+                result_payload = await analyze_comment(
+                    comment_body=comment.body,
+                    perception_body=comment.perception.body,
+                    topic_name=comment.perception.topic.name if comment.perception.topic else None,
+                )
+                _validate_analysis_payload(
+                    sentiment=result_payload.get("sentiment"),
+                    stance=result_payload.get("stance"),
+                    quality_score=result_payload.get("quality_score"),
+                )
+                await upsert_comment_intelligence(
+                    db,
+                    comment_id=comment.id,
+                    status="analyzed",
+                    sentiment=result_payload.get("sentiment"),
+                    stance=result_payload.get("stance"),
+                    themes=result_payload.get("themes") or [],
+                    is_question=bool(result_payload.get("is_question")),
+                    has_concern=bool(result_payload.get("has_concern")),
+                    agreement_signal=bool(result_payload.get("agreement_signal")),
+                    disagreement_signal=bool(result_payload.get("disagreement_signal")),
+                    quality_score=float(result_payload.get("quality_score")),
+                    model_version=settings.COMMENT_INTELLIGENCE_MODEL,
+                    analyzed_at=datetime.now(timezone.utc),
+                    error_code=None,
+                )
+                processed += 1
+            except CommentIntelligenceProviderError as exc:
+                if exc.code in {"provider_not_configured", "provider_timeout", "provider_request_error"}:
+                    # Keep transient/configuration failures retryable.
+                    logger.warning("Comment %s remains pending: %s", comment.id, exc.code)
+                    continue
+                intelligence.status = "failed"
+                intelligence.error_code = exc.code
+                intelligence.model_version = settings.COMMENT_INTELLIGENCE_MODEL
+                processed += 1
+            except (TypeError, ValueError) as exc:
+                logger.warning("Comment %s produced invalid semantic output: %s", comment.id, exc.__class__.__name__)
+                intelligence.status = "failed"
+                intelligence.error_code = "invalid_analysis"
+                intelligence.model_version = settings.COMMENT_INTELLIGENCE_MODEL
+                processed += 1
+
+        await db.commit()
+        return processed
