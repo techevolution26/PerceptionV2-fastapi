@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from math import sqrt
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy.orm import selectinload
@@ -26,15 +27,12 @@ from app.schemas.business import (
     AnalyticsGeoTopicOut,
     AnalyticsTopicOut,
     AnalyticsTrendPoint,
-    PerceptionAnalyticsOut,
 )
 from app.services.subscriptions import require_analytics_access
-from app.services.comment_cross_analysis import (
-    aggregate_professional_geographic_semantics,
-)
+from app.services.comment_cross_analysis import aggregate_professional_geographic_semantics
+from app.services.perception_intelligence import MINIMUM_SAMPLE, decision_context, orchestrate_perception_intelligence
+from app.schemas.perception_intelligence import PerceptionIntelligence
 from app.services.comment_intelligence import (
-    SEMANTIC_SAMPLE_MINIMUM,
-    aggregate_comment_intelligence,
     get_comment_intelligence_participant_rows,
     get_comment_intelligence_rows,
 )
@@ -797,9 +795,16 @@ async def analytics_opportunity_detail(
     }
 
 
-@router.get("/perceptions/{perception_id}", response_model=PerceptionAnalyticsOut)
+@router.get("/perceptions/{perception_id}", response_model=PerceptionIntelligence)
 async def perception_analytics(
-    perception_id: int, current_user: CurrentUser, db: DbSession, days: int = 30
+    perception_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+    days: int = 30,
+    decision_intent: Literal[
+        "research", "business", "policy", "journalism", "education",
+        "product", "professional", "general_exploration"
+    ] = "general_exploration",
 ):
     days = max(7, min(days, 365))
     p = await db.scalar(
@@ -813,11 +818,12 @@ async def perception_analytics(
 
     is_author = p.user_id == current_user.id
     if is_author:
-        # Creator analytics remain subscription-gated. Public conversation
-        # intelligence is intentionally available without exposing creator-only
-        # analytics to other users.
         await require_analytics_access(db, current_user.id)
-    since = max(p.created_at, datetime.now(timezone.utc) - timedelta(days=days))
+
+    now = datetime.now(timezone.utc)
+    period_end = now
+    since = max(p.created_at, now - timedelta(days=days))
+
     likes = int(
         await db.scalar(
             select(func.count(Like.id)).where(
@@ -854,12 +860,12 @@ async def perception_analytics(
         )
         or 0
     )
+
     ids = set(
         (
             await db.execute(
                 select(Like.user_id).where(
-                    Like.perception_id == p.id,
-                    Like.created_at >= since,
+                    Like.perception_id == p.id, Like.created_at >= since
                 )
             )
         )
@@ -870,8 +876,7 @@ async def perception_analytics(
         (
             await db.execute(
                 select(Comment.user_id).where(
-                    Comment.perception_id == p.id,
-                    Comment.created_at >= since,
+                    Comment.perception_id == p.id, Comment.created_at >= since
                 )
             )
         )
@@ -891,6 +896,7 @@ async def perception_analytics(
         .scalars()
         .all()
     )
+
     activity = (
         await db.execute(
             select(
@@ -906,20 +912,16 @@ async def perception_analytics(
         )
     ).all()
     participants = (
-        (await db.execute(select(User).where(User.id.in_(ids)))).scalars().all()
-        if ids
-        else []
-    )
+        await db.execute(select(User).where(User.id.in_(ids)))
+    ).scalars().all() if ids else []
 
-    # Keep the first small-scope audience view intentionally aggregate-only.
-    # Role/location claims are suppressed when the participant sample is too small.
-    audience_minimum = 5
+    audience_minimum = MINIMUM_SAMPLE
     country_counts: dict[str, int] = {}
     region_counts: dict[str, int] = {}
     role_counts: dict[str, int] = {}
     verified_role_counts: dict[str, int] = {}
-    audience_breakdown_available = len(participants) >= audience_minimum
-    if audience_breakdown_available:
+    audience_available = len(participants) >= audience_minimum
+    if audience_available:
         for participant in participants:
             country = (participant.country_code or "UNKNOWN").upper()
             country_counts[country] = country_counts.get(country, 0) + 1
@@ -935,7 +937,6 @@ async def perception_analytics(
                 if code in (participant.verified_professional_roles or []):
                     verified_role_counts[code] = verified_role_counts.get(code, 0) + 1
 
-    # Role labels are resolved from the user's structured identity.
     role_label_by_code: dict[str, str] = {}
     for participant in participants:
         for code, label in zip(
@@ -943,113 +944,146 @@ async def perception_analytics(
         ):
             role_label_by_code[str(code)] = label
 
-    viewer_lens = "author" if is_author else "observer"
-    intelligence_scope = (
-        "creator_analytics" if is_author else "conversation_intelligence"
-    )
     semantic_rows = await get_comment_intelligence_rows(db, p.id, since)
-    semantic = aggregate_comment_intelligence(
-        semantic_rows, period_days=days, minimum=SEMANTIC_SAMPLE_MINIMUM
-    )
     semantic_participant_rows = await get_comment_intelligence_participant_rows(
         db, p.id, since
     )
     cross_analysis = aggregate_professional_geographic_semantics(
-        semantic_participant_rows, minimum=SEMANTIC_SAMPLE_MINIMUM
+        semantic_participant_rows, minimum=MINIMUM_SAMPLE
     )
-    methodology = [
-        "Audience counts are unique interacting participants during the selected period; individuals are not exposed.",
-        f"Professional and geographic breakdowns are suppressed below {audience_minimum} unique participants.",
-        "Country and regional results describe participants represented in this Perception; they are not population-representative estimates.",
-        "Professional-role results use user-declared structured identity and separately identify verified professional roles where available.",
-        "Semantic signals are exposed only from stored analyzed-comment results; no labels are inferred from engagement counts.",
-        f"Semantic interpretation is suppressed below {SEMANTIC_SAMPLE_MINIMUM} analyzed comments.",
-        f"Professional and geographic semantic cohorts are independently suppressed below {SEMANTIC_SAMPLE_MINIMUM} analyzed comments.",
-    ]
-    if is_author:
-        methodology.insert(
-            0,
-            "Creator analytics are available only to the author and require an analytics-enabled plan.",
-        )
-    else:
-        methodology.insert(
-            0,
-            "This observer view exposes conversation-level aggregates, not the author's private performance analytics.",
-        )
-
-    return PerceptionAnalyticsOut(
-        perception_id=p.id,
-        viewer_lens=viewer_lens,
-        intelligence_scope=intelligence_scope,
-        period_days=days,
-        created_at=p.created_at,
+    composed = orchestrate_perception_intelligence(
         topic_id=p.topic_id,
         topic_name=p.topic.name if p.topic else None,
-        author_professional_role=p.user.primary_professional_role_label
-        or p.user.profession,
-        author_verified=(
-            p.user.verification_status == "VERIFIED"
-            and bool(p.user.verified_professional_roles)
-        ),
-        likes=likes,
-        comments=comments,
-        views=views if is_author else None,
-        shares=shares if is_author else None,
-        unique_participants=len(ids),
-        engagement_rate=(
-            (round((likes + comments + shares) / views, 4) if views else 0.0)
-            if is_author
-            else None
-        ),
-        daily_activity=(
-            [{"date": str(d), "interactions": int(c)} for d, c in activity]
-            if is_author
-            else []
-        ),
-        audience_breakdown_minimum=audience_minimum,
-        audience_breakdown_available=audience_breakdown_available,
-        top_countries=[
-            {"country_code": code, "participants": count}
-            for code, count in sorted(
-                country_counts.items(), key=lambda item: item[1], reverse=True
-            )[:10]
-        ],
-        top_regions=[
-            {"region": region, "participants": count}
-            for region, count in sorted(
-                region_counts.items(), key=lambda item: item[1], reverse=True
-            )[:10]
-        ],
-        top_professional_roles=[
-            {
-                "role_code": code,
-                "role_label": role_label_by_code.get(code, code),
-                "participants": count,
-            }
-            for code, count in sorted(
-                role_counts.items(), key=lambda item: item[1], reverse=True
-            )[:10]
-        ],
-        top_verified_professional_roles=[
-            {
-                "role_code": code,
-                "role_label": role_label_by_code.get(code, code),
-                "participants": count,
-            }
-            for code, count in sorted(
-                verified_role_counts.items(), key=lambda item: item[1], reverse=True
-            )[:10]
-        ],
-        **semantic,
-        **cross_analysis,
-        methodology=methodology
-        + [
-            "Observed interaction counts for this perception; not causal inference.",
-            "Likes/comments use the selected period; VIEW/SHARE are deduplicated per participant per event type per day.",
-            "Engagement rate = (likes + comments + shares) / views for the selected period; 0 when no views are observed.",
-            "Audience geography and professional-role breakdowns count unique interacting participants, not raw events.",
-            "Region is reported only as an aggregate country-region label; individual cities are not exposed in this report.",
-            "Verified professional-role breakdowns include only roles the platform has confirmed for participating users.",
-            "Audience breakdowns are suppressed below 5 unique participants to avoid over-interpreting very small groups.",
-        ],
+        perception_id=p.id,
+        period_start=since,
+        period_end=period_end,
+        period_days=days,
+        semantic_rows=semantic_rows,
+        participant_rows=semantic_participant_rows,
+        cross_lens=cross_analysis,
+        minimum=MINIMUM_SAMPLE,
     )
+
+    semantic_data = composed["semantic"]["semantic_evidence"]
+    semantic_observed = {item["type"]: item["observed"] for item in semantic_data["evidence"]}
+    semantic_available = semantic_data["evidence_status"] == "available"
+
+    semantic = {
+        "status": "available" if semantic_available else "insufficient_sample",
+        "note": (
+            "Aggregate semantic signals from analyzed comments."
+            if semantic_available
+            else f"Semantic intelligence is withheld until at least {MINIMUM_SAMPLE} comments have been analyzed."
+        ),
+        "sample_minimum": MINIMUM_SAMPLE,
+        "analyzed_comment_count": composed["semantic"]["analyzed_comment_count"],
+        "period_days": days,
+        "quality_score": semantic_data["quality_score"],
+        "sentiment_distribution": semantic_observed.get("sentiment_distribution", []),
+        "stance_distribution": semantic_observed.get("stance_distribution", []),
+        "top_themes": semantic_observed.get("top_themes", []),
+        "question_count": semantic_observed.get("question_count", 0),
+        "concern_themes": semantic_observed.get("concern_themes", []),
+        "agreement_themes": semantic_observed.get("agreement_themes", []),
+        "disagreement_themes": semantic_observed.get("disagreement_themes", []),
+    }
+
+    perspective = {
+        "status": cross_analysis["cross_analysis_status"],
+        "note": cross_analysis["cross_analysis_note"],
+        "sample_minimum": cross_analysis["cross_analysis_sample_minimum"],
+        "analyzed_comment_count": cross_analysis["cross_analysis_comment_count"],
+        "professional": cross_analysis["professional_semantic_segments"],
+        "geographic": cross_analysis["geographic_semantic_segments"],
+        "cross_lens": cross_analysis["professional_geographic_segments"],
+    }
+
+    methodology_limits = [
+        "Platform observations are not automatically population-representative.",
+        "Observational patterns do not establish causation.",
+        "Individual participant identities are not exposed in intelligence aggregates.",
+    ]
+    methodology_rules = [
+        f"Semantic intelligence is suppressed below {MINIMUM_SAMPLE} analyzed comments.",
+        f"Professional and geographic semantic cohorts are independently suppressed below {MINIMUM_SAMPLE} comments.",
+        "Professional cohorts use primary professional identity; geography uses country and region.",
+        "City-level reporting is not exposed.",
+        "Creator measurements are visible only to the author; observer scope exposes conversation-level aggregates.",
+        "Decision context reframes observed evidence and does not establish causation or prediction.",
+    ]
+    if is_author:
+        methodology_rules.insert(0, "Creator analytics require an analytics-enabled plan.")
+
+    try:
+        decision = decision_context(intent=decision_intent, signals=[])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    measurements = {
+        "likes": {"value": likes, "available": True, "description": "Likes recorded during the selected period."},
+        "comments": {"value": comments, "available": True, "description": "Comments recorded during the selected period."},
+        "views": {"value": views if is_author else None, "available": is_author, "description": "Views recorded during the selected period; creator-only."},
+        "shares": {"value": shares if is_author else None, "available": is_author, "description": "Shares recorded during the selected period; creator-only."},
+        "engagement_rate": {
+            "value": (round((likes + comments + shares) / views, 4) if views else 0.0) if is_author else None,
+            "available": is_author,
+            "description": "(likes + comments + shares) / views for the selected period; creator-only.",
+        },
+        "daily_activity": [
+            {"date": str(d), "interactions": int(c)} for d, c in activity
+        ] if is_author else [],
+    }
+
+    return PerceptionIntelligence(
+        context={
+            "schema_version": composed["schema_version"],
+            "topic_id": p.topic_id,
+            "topic_name": p.topic.name if p.topic else None,
+            "perception_id": p.id,
+            "period_start": since,
+            "period_end": period_end,
+            "period_days": days,
+            "scope": "creator_analytics" if is_author else "conversation_intelligence",
+            "viewer_lens": "author" if is_author else "observer",
+            "author": {
+                "professional_role": p.user.primary_professional_role_label or p.user.profession,
+                "verified": p.user.verification_status == "VERIFIED" and bool(p.user.verified_professional_roles),
+            },
+        },
+        measurements=measurements,
+        audience={
+            "unique_participants": len(ids),
+            "breakdown": {
+                "minimum": audience_minimum,
+                "available": audience_available,
+                "countries": [
+                    {"country_code": code, "participants": count}
+                    for code, count in sorted(country_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+                ],
+                "regions": [
+                    {"region": region, "participants": count}
+                    for region, count in sorted(region_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+                ],
+                "professional_roles": [
+                    {"role_code": code, "role_label": role_label_by_code.get(code, code), "participants": count}
+                    for code, count in sorted(role_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+                ],
+                "verified_professional_roles": [
+                    {"role_code": code, "role_label": role_label_by_code.get(code, code), "participants": count}
+                    for code, count in sorted(verified_role_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+                ],
+            },
+        },
+        semantic=semantic,
+        perspectives=perspective,
+        patterns=[],
+        signals=[],
+        decision_context=decision,
+        methodology={
+            "sample_minimum": MINIMUM_SAMPLE,
+            "quality_score_definition": "Mean stored comment-intelligence quality score across analyzed comments; no score is exposed below the minimum sample.",
+            "limitations": methodology_limits,
+            "rules": methodology_rules,
+        },
+    )
+
