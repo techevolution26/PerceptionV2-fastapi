@@ -11,6 +11,7 @@ from app.api.deps import CurrentUser, DbSession
 from app.models.models import (
     AnalyticsTopic,
     Comment,
+    CommentIntelligence,
     Like,
     Perception,
     PerceptionInteraction,
@@ -33,6 +34,8 @@ from app.services.comment_cross_analysis import aggregate_professional_geographi
 from app.services.perception_intelligence import MINIMUM_SAMPLE, decision_context, orchestrate_perception_intelligence
 from app.schemas.perception_intelligence import PerceptionIntelligence
 from app.services.temporal_intelligence import build_temporal_intelligence
+from app.services.profile_intelligence import PROFILE_WINDOW_DAYS, build_profile_intelligence
+from app.schemas.profile_intelligence import ProfileIntelligence
 from app.services.comment_intelligence import (
     get_comment_intelligence_participant_rows,
     get_comment_intelligence_rows,
@@ -1097,3 +1100,73 @@ async def perception_analytics(
         },
     )
 
+
+
+@router.get("/profile", response_model=ProfileIntelligence)
+async def profile_intelligence(
+    current_user: CurrentUser,
+    db: DbSession,
+    days: int = PROFILE_WINDOW_DAYS,
+):
+    """Longitudinal intelligence across the current user's authored Perceptions."""
+    await require_analytics_access(db, current_user.id)
+    days = max(30, min(days, 365))
+    now = datetime.now(timezone.utc)
+    period_start = now - timedelta(days=days)
+
+    perceptions = (
+        await db.execute(
+            select(Perception)
+            .join(User, User.id == Perception.user_id)
+            .options(selectinload(Perception.topic))
+            .where(
+                Perception.user_id == current_user.id,
+                User.is_active.is_(True),
+                Perception.created_at >= period_start,
+                Perception.created_at <= now,
+            )
+            .order_by(Perception.created_at.asc())
+        )
+    ).scalars().all()
+
+    perception_ids = [p.id for p in perceptions]
+    semantic_rows = []
+    if perception_ids:
+        result = await db.execute(
+            select(CommentIntelligence, Comment.perception_id, Perception.topic_id, Topic.name, Comment.created_at)
+            .join(Comment, Comment.id == CommentIntelligence.comment_id)
+            .join(Perception, Perception.id == Comment.perception_id)
+            .outerjoin(Topic, Topic.id == Perception.topic_id)
+            .where(
+                Comment.perception_id.in_(perception_ids),
+                Comment.created_at >= period_start,
+                Comment.created_at <= now,
+                CommentIntelligence.status == "analyzed",
+            )
+            .order_by(Comment.created_at.asc())
+        )
+        semantic_rows = result.all()
+
+    built = build_profile_intelligence(
+        perceptions=perceptions,
+        semantic_rows=semantic_rows,
+        period_start=period_start,
+        period_end=now,
+        minimum=MINIMUM_SAMPLE,
+    )
+    return ProfileIntelligence(
+        schema_version=built["schema_version"],
+        period_start=period_start,
+        period_end=now,
+        period_days=days,
+        sample_minimum=built["sample_minimum"],
+        perception_count=built["perception_count"],
+        topic_count=built["topic_count"],
+        analyzed_comment_count=built["analyzed_comment_count"],
+        qualifying_perception_count=built["qualifying_perception_count"],
+        topics=built["topics"],
+        recurring_themes=built["recurring_themes"],
+        temporal=built["temporal"],
+        patterns=built["patterns"],
+        limitations=built["limitations"],
+    )
