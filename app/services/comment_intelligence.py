@@ -137,6 +137,25 @@ async def get_comment_intelligence_rows(
     return list(result.scalars().all())
 
 
+async def get_comment_intelligence_temporal_rows(
+    db: AsyncSession,
+    perception_id: int,
+    since: datetime,
+) -> list[tuple[CommentIntelligence, datetime]]:
+    """Return analyzed intelligence paired with the original comment time."""
+    result = await db.execute(
+        select(CommentIntelligence, Comment.created_at)
+        .join(Comment, Comment.id == CommentIntelligence.comment_id)
+        .where(
+            Comment.perception_id == perception_id,
+            Comment.created_at >= since,
+            CommentIntelligence.status == "analyzed",
+        )
+        .order_by(Comment.created_at.asc())
+    )
+    return list(result.all())
+
+
 async def get_comment_intelligence_participant_rows(
     db: AsyncSession,
     perception_id: int,

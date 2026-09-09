@@ -138,3 +138,69 @@ def test_derive_patterns_and_signals_only_emits_descriptive_signals():
     assert all(signal["sample_size"] == 10 for signal in signals)
     assert all("causation" in " ".join(signal["limitations"]).lower() for signal in signals)
     assert all("predict" not in signal["description"].lower() for signal in signals)
+
+
+def test_cross_lens_comparison_detects_convergence_and_divergence():
+    from app.services.perception_intelligence import analyze_cross_lens_divergence
+
+    professional = [
+        {
+            "role_code": "farmer",
+            "role_label": "Farmer",
+            "sample_size": 7,
+            "stance_distribution": [{"label": "supportive", "comments": 5}],
+            "top_themes": [{"theme": "cost", "comments": 4}],
+        },
+        {
+            "role_code": "teacher",
+            "role_label": "Teacher",
+            "sample_size": 6,
+            "stance_distribution": [{"label": "supportive", "comments": 4}],
+            "top_themes": [{"theme": "cost", "comments": 3}],
+        },
+        {
+            "role_code": "doctor",
+            "role_label": "Doctor",
+            "sample_size": 5,
+            "stance_distribution": [{"label": "challenging", "comments": 3}],
+            "top_themes": [{"theme": "cost", "comments": 2}],
+        },
+    ]
+
+    result = analyze_cross_lens_divergence(
+        professional_segments=professional,
+        geographic_segments=[],
+        cross_lens_segments=[],
+    )
+
+    assert result["status"] == "available"
+    assert any(item["type"] == "stance_and_theme_convergence" for item in result["convergence"])
+    assert any(item["type"] == "stance_divergence" for item in result["divergence"])
+    assert all("why" not in item["description"].lower() for item in result["divergence"])
+
+
+def test_cross_lens_comparison_suppresses_nonqualifying_cohorts():
+    from app.services.perception_intelligence import analyze_cross_lens_divergence
+
+    result = analyze_cross_lens_divergence(
+        professional_segments=[
+            {
+                "role_label": "Farmer",
+                "sample_size": 4,
+                "stance_distribution": [{"label": "supportive", "comments": 4}],
+                "top_themes": [{"theme": "cost", "comments": 4}],
+            },
+            {
+                "role_label": "Teacher",
+                "sample_size": 5,
+                "stance_distribution": [{"label": "supportive", "comments": 5}],
+                "top_themes": [{"theme": "cost", "comments": 5}],
+            },
+        ],
+        geographic_segments=[],
+        cross_lens_segments=[],
+    )
+
+    assert result["status"] == "insufficient_comparison"
+    assert result["convergence"] == []
+    assert result["divergence"] == []

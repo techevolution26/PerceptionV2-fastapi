@@ -32,9 +32,11 @@ from app.services.subscriptions import require_analytics_access
 from app.services.comment_cross_analysis import aggregate_professional_geographic_semantics
 from app.services.perception_intelligence import MINIMUM_SAMPLE, decision_context, orchestrate_perception_intelligence
 from app.schemas.perception_intelligence import PerceptionIntelligence
+from app.services.temporal_intelligence import build_temporal_intelligence
 from app.services.comment_intelligence import (
     get_comment_intelligence_participant_rows,
     get_comment_intelligence_rows,
+    get_comment_intelligence_temporal_rows,
 )
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -945,6 +947,9 @@ async def perception_analytics(
             role_label_by_code[str(code)] = label
 
     semantic_rows = await get_comment_intelligence_rows(db, p.id, since)
+    temporal_rows = await get_comment_intelligence_temporal_rows(db, p.id, since)
+    temporal = build_temporal_intelligence(temporal_rows, period_start=since, period_end=period_end, minimum=MINIMUM_SAMPLE)
+
     semantic_participant_rows = await get_comment_intelligence_participant_rows(
         db, p.id, since
     )
@@ -1079,6 +1084,8 @@ async def perception_analytics(
         },
         semantic=semantic,
         perspectives=perspective,
+        cross_lens_analysis=composed["cross_lens_comparison"],
+        temporal=temporal,
         patterns=patterns,
         signals=signals,
         decision_context=decision,

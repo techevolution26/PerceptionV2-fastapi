@@ -119,6 +119,27 @@ class IntelligenceEvidence(BaseModel):
     observed: list[dict] | dict | int | float | None
 
 
+class CrossLensComparison(BaseModel):
+    dimension: Literal["professional", "geographic", "professional_geographic"]
+    cohort_a: str
+    cohort_b: str
+    sample_size_a: int
+    sample_size_b: int
+    leading_stance_a: str | None
+    leading_stance_b: str | None
+    shared_themes: list[str] = Field(default_factory=list)
+    type: Literal["stance_and_theme_convergence", "stance_divergence", "thematic_divergence"]
+    description: str
+
+
+class CrossLensComparisonAnalysis(BaseModel):
+    status: Literal["available", "insufficient_comparison"]
+    sample_minimum: int
+    convergence: list[CrossLensComparison] = Field(default_factory=list)
+    divergence: list[CrossLensComparison] = Field(default_factory=list)
+    note: str
+
+
 class IntelligencePattern(BaseModel):
     label: str
     description: str
@@ -149,6 +170,43 @@ class DecisionContext(BaseModel):
     guardrail: str
 
 
+class TemporalBucket(BaseModel):
+    period_start: datetime
+    period_end: datetime
+    sample_size: int
+    status: Literal["available", "insufficient_sample"]
+    sentiment_distribution: list[SemanticDistribution]
+    stance_distribution: list[SemanticDistribution]
+    top_themes: list[SemanticTheme]
+    question_count: int
+    quality_score: float | None
+
+
+class TemporalChange(BaseModel):
+    from_period_start: datetime
+    to_period_end: datetime
+    sample_size_from: int
+    sample_size_to: int
+    leading_stance_from: str | None
+    leading_stance_to: str | None
+    leading_theme_from: str | None
+    leading_theme_to: str | None
+    stance_changed: bool
+    theme_changed: bool
+
+
+class TemporalIntelligence(BaseModel):
+    schema_version: str
+    status: Literal["available", "insufficient_sample"]
+    bucket_days: int
+    sample_minimum: int
+    qualifying_bucket_count: int
+    buckets: list[TemporalBucket]
+    changes: list[TemporalChange]
+    note: str
+    limitations: list[str]
+
+
 class IntelligenceMethodology(BaseModel):
     sample_minimum: int
     quality_score_definition: str
@@ -162,6 +220,8 @@ class PerceptionIntelligence(BaseModel):
     audience: IntelligenceAudience
     semantic: SemanticIntelligence
     perspectives: IntelligencePerspectives
+    cross_lens_analysis: CrossLensComparisonAnalysis
+    temporal: TemporalIntelligence
     patterns: list[IntelligencePattern]
     signals: list[IntelligenceSignal]
     decision_context: DecisionContext

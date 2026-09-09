@@ -230,10 +230,119 @@ def decision_context(
 
 
 
+
+def _dominant_label(segment: dict[str, Any], field: str) -> str | None:
+    values = segment.get(field) or []
+    if not values:
+        return None
+    value = values[0]
+    return str(value.get("label")) if isinstance(value, dict) and value.get("label") else None
+
+
+def _theme_labels(segment: dict[str, Any], limit: int = 3) -> set[str]:
+    return {
+        str(item.get("theme")).strip()
+        for item in (segment.get("top_themes") or [])[:limit]
+        if isinstance(item, dict) and str(item.get("theme", "")).strip()
+    }
+
+
+def analyze_cross_lens_divergence(
+    *,
+    professional_segments: list[dict[str, Any]],
+    geographic_segments: list[dict[str, Any]],
+    cross_lens_segments: list[dict[str, Any]],
+    minimum: int = MINIMUM_SAMPLE,
+) -> dict[str, Any]:
+    """Compare qualifying cohorts without identifying or ranking individuals.
+
+    Convergence requires the same leading stance and at least one shared theme.
+    Divergence is reported when leading stances differ, or when stances match
+    but the leading themes do not overlap. These are descriptive comparisons,
+    not explanations of why cohorts differ.
+    """
+    groups = {
+        "professional": professional_segments,
+        "geographic": geographic_segments,
+        "professional_geographic": cross_lens_segments,
+    }
+    convergence: list[dict[str, Any]] = []
+    divergence: list[dict[str, Any]] = []
+
+    for dimension, segments in groups.items():
+        qualifying = [s for s in segments if int(s.get("sample_size", 0)) >= minimum]
+        for index, left in enumerate(qualifying):
+            for right in qualifying[index + 1:]:
+                left_stance = _dominant_label(left, "stance_distribution")
+                right_stance = _dominant_label(right, "stance_distribution")
+                shared_themes = sorted(_theme_labels(left) & _theme_labels(right))
+                left_label = (
+                    f"{left.get('role_label', left.get('role_code'))} · {left.get('geography')}"
+                    if dimension == "professional_geographic"
+                    else left.get("role_label", left.get("geography", left.get("role_code")))
+                )
+                right_label = (
+                    f"{right.get('role_label', right.get('role_code'))} · {right.get('geography')}"
+                    if dimension == "professional_geographic"
+                    else right.get("role_label", right.get("geography", right.get("role_code")))
+                )
+                base = {
+                    "dimension": dimension,
+                    "cohort_a": str(left_label),
+                    "cohort_b": str(right_label),
+                    "sample_size_a": int(left.get("sample_size", 0)),
+                    "sample_size_b": int(right.get("sample_size", 0)),
+                    "leading_stance_a": left_stance,
+                    "leading_stance_b": right_stance,
+                    "shared_themes": shared_themes,
+                }
+                if left_stance and left_stance == right_stance and shared_themes:
+                    convergence.append({
+                        **base,
+                        "type": "stance_and_theme_convergence",
+                        "description": (
+                            f"{left_label} and {right_label} share the same leading stance "
+                            f"and at least one of their leading themes."
+                        ),
+                    })
+                elif left_stance and right_stance and left_stance != right_stance:
+                    divergence.append({
+                        **base,
+                        "type": "stance_divergence",
+                        "description": (
+                            f"{left_label} and {right_label} have different leading stances "
+                            f"within the observed response sample."
+                        ),
+                    })
+                elif left_stance and left_stance == right_stance and not shared_themes:
+                    divergence.append({
+                        **base,
+                        "type": "thematic_divergence",
+                        "description": (
+                            f"{left_label} and {right_label} share the same leading stance "
+                            f"but have no overlapping themes among their leading recorded themes."
+                        ),
+                    })
+
+    convergence.sort(key=lambda item: (item["dimension"], -min(item["sample_size_a"], item["sample_size_b"])))
+    divergence.sort(key=lambda item: (item["dimension"], -min(item["sample_size_a"], item["sample_size_b"])))
+    return {
+        "status": "available" if (convergence or divergence) else "insufficient_comparison",
+        "sample_minimum": minimum,
+        "convergence": convergence[:20],
+        "divergence": divergence[:20],
+        "note": (
+            "Comparisons are descriptive and limited to qualifying cohorts. "
+            "They show where observed leading stances or themes align or differ; "
+            "they do not explain causes or represent population-wide opinion."
+        ),
+    }
+
 def derive_patterns_and_signals(
     *,
     semantic_evidence: dict[str, Any],
     cross_lens_evidence: dict[str, Any],
+    cross_lens_comparison: dict[str, Any] | None = None,
     minimum: int = MINIMUM_SAMPLE,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Derive only deterministic, descriptive patterns from qualified evidence.
@@ -330,11 +439,32 @@ def derive_patterns_and_signals(
                 ["professional_perspectives", "geographic_perspectives"],
             )
 
+    comparison = cross_lens_comparison or {}
+    convergence = comparison.get("convergence", [])
+    divergence = comparison.get("divergence", [])
+    if convergence:
+        first = convergence[0]
+        add(
+            "Cross-lens convergence",
+            first["description"],
+            ["cross_lens_convergence"],
+        )
+    if divergence:
+        first = divergence[0]
+        add(
+            "Cross-lens divergence",
+            first["description"],
+            ["cross_lens_divergence"],
+        )
+
     # Signals deliberately reuse pattern descriptions and carry the exact
     # evidence sample/limitations instead of introducing stronger claims.
     for pattern in patterns:
         evidence = semantic_evidence
-        if any(kind in pattern["evidence_types"] for kind in ("professional_perspectives", "geographic_perspectives")):
+        if any(kind in pattern["evidence_types"] for kind in (
+            "professional_perspectives", "geographic_perspectives",
+            "cross_lens_convergence", "cross_lens_divergence",
+        )):
             evidence = cross_lens_evidence
         signals.append({
             "label": pattern["label"],
@@ -386,9 +516,16 @@ def orchestrate_perception_intelligence(
         professional_geographic_segments=cross_lens.get("professional_geographic_segments", []),
         minimum=minimum,
     )
+    cross_lens_comparison = analyze_cross_lens_divergence(
+        professional_segments=cross_lens.get("professional_semantic_segments", []),
+        geographic_segments=cross_lens.get("geographic_semantic_segments", []),
+        cross_lens_segments=cross_lens.get("professional_geographic_segments", []),
+        minimum=minimum,
+    )
     patterns, signals = derive_patterns_and_signals(
         semantic_evidence=semantic["semantic_evidence"],
         cross_lens_evidence=cross,
+        cross_lens_comparison=cross_lens_comparison,
         minimum=minimum,
     )
     return {
@@ -398,6 +535,7 @@ def orchestrate_perception_intelligence(
         "period_days": period_days,
         "semantic": semantic,
         "cross_lens": cross,
+        "cross_lens_comparison": cross_lens_comparison,
         "patterns": patterns,
         "signals": signals,
     }
