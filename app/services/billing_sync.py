@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.models import BillingEvent, Plan, Subscription, User
+from app.services.subscriptions import subscription_has_current_access
 
 
 def _dt_from_unix(value: Any) -> datetime | None:
@@ -17,12 +18,6 @@ def _dt_from_unix(value: Any) -> datetime | None:
     return datetime.fromtimestamp(int(value), tz=timezone.utc)
 
 
-def _status_for_access(status: str, current_period_end: datetime | None) -> bool:
-    if status in {"active", "trialing"}:
-        return True
-    if status == "past_due" and current_period_end is not None:
-        return current_period_end > datetime.now(timezone.utc)
-    return False
 
 
 async def sync_stripe_subscription(db: AsyncSession, stripe_subscription: dict[str, Any]) -> Subscription | None:
@@ -156,4 +151,4 @@ async def process_stripe_event(db: AsyncSession, event: dict[str, Any]) -> bool:
 def has_analytics_access(sub: Subscription | None) -> bool:
     if sub is None or sub.plan is None:
         return False
-    return bool(sub.plan.analytics_enabled and _status_for_access(sub.status, sub.current_period_end or sub.ends_at or sub.trial_ends_at))
+    return bool(sub.plan.analytics_enabled and subscription_has_current_access(sub))

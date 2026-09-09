@@ -5,6 +5,24 @@ from sqlalchemy.orm import selectinload
 from app.models.models import Plan, Subscription
 
 
+def subscription_has_current_access(sub: Subscription | None, now: datetime | None = None) -> bool:
+    """Return whether a subscription is currently entitled to its plan.
+
+    ``past_due`` is a temporary grace state only while the current paid period
+    remains valid. Missing or expired period boundaries fail closed.
+    """
+    if sub is None or sub.plan is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    status = sub.status.lower()
+    expiry = sub.current_period_end or sub.ends_at or sub.trial_ends_at
+    if expiry is not None and expiry <= now:
+        return False
+    if status in {"active", "trialing"}:
+        return True
+    return status == "past_due" and expiry is not None and expiry > now
+
+
 async def get_current_subscription(db, user_id: int) -> Subscription | None:
     result = await db.execute(
         select(Subscription)
@@ -15,12 +33,12 @@ async def get_current_subscription(db, user_id: int) -> Subscription | None:
     subscriptions = result.scalars().all()
     now = datetime.now(timezone.utc)
     for sub in subscriptions:
+        if subscription_has_current_access(sub, now):
+            return sub
         if sub.status.lower() in {"active", "trialing", "past_due"}:
             expiry = sub.current_period_end or sub.ends_at or sub.trial_ends_at
             if expiry is not None and expiry <= now:
                 sub.status = "EXPIRED"
-                continue
-            return sub
     if subscriptions:
         await db.flush()
     return None

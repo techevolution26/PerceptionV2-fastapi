@@ -16,7 +16,7 @@ from app.schemas.business import (
 )
 from app.services.billing import BillingProviderError, StripeBillingProvider
 from app.services.billing_sync import process_stripe_event
-from app.services.subscriptions import get_current_subscription, get_plan
+from app.services.subscriptions import get_current_subscription, get_plan, subscription_has_current_access
 
 router = APIRouter(prefix="/subscription", tags=["subscriptions"])
 
@@ -25,11 +25,7 @@ def _to_out(sub: Subscription | None) -> SubscriptionOut:
     if sub is None:
         return SubscriptionOut(status="NONE")
     plan = sub.plan
-    now = datetime.now(timezone.utc)
-    expiry = sub.current_period_end or sub.ends_at or sub.trial_ends_at
-    active = sub.status in {"ACTIVE", "TRIALING", "active", "trialing", "past_due"} and (
-        expiry is None or expiry > now
-    )
+    active = subscription_has_current_access(sub)
     return SubscriptionOut(
         id=sub.id,
         status=sub.status.upper() if active else "EXPIRED",

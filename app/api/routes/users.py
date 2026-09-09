@@ -9,6 +9,7 @@ from app.schemas.content import PerceptionOut, TopicOut
 from app.schemas.business import AnalyticsProfileUpdate
 from app.schemas.user import UpdateMeRequest, UserMe, UserProfile, UserSlim
 from app.services.storage import ALLOWED_IMAGE_TYPES, save_upload
+from app.services.subscriptions import require_analytics_access
 from app.services.notifications import notify
 from app.services.professional_taxonomy import INDUSTRIES, ROLES, validate_identity_selection, ROLE_MAP
 
@@ -77,19 +78,33 @@ async def update_analytics_profile(
     db: DbSession,
 ):
     # Professional identity is managed by the dedicated identity flow.
-    # The analytical profile only controls analytical scope and location context.
+    # The analytical profile is a paid analytics capability, so the server
+    # enforces the same entitlement used by analytics endpoints.
+    sub = await require_analytics_access(db, current_user.id)
+    specialties_supplied = "analytics_specialties" in payload.model_fields_set
+    primary_supplied = "primary_analytics_topic_id" in payload.model_fields_set
+    country_supplied = "country_code" in payload.model_fields_set
+    region_supplied = "region" in payload.model_fields_set
+    city_supplied = "city" in payload.model_fields_set
+
     topic_ids = (
-        list(dict.fromkeys(payload.analytics_specialties))
-        if payload.analytics_specialties is not None
+        list(dict.fromkeys(payload.analytics_specialties or []))
+        if specialties_supplied
         else list(current_user.analytics_specialties or [])
     )
     primary_topic_id = (
         payload.primary_analytics_topic_id
-        if payload.primary_analytics_topic_id is not None
+        if primary_supplied
         else current_user.primary_analytics_topic_id
     )
     if primary_topic_id is not None and primary_topic_id not in topic_ids:
         topic_ids.insert(0, primary_topic_id)
+
+    if len(topic_ids) > sub.plan.max_topics:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Your plan supports up to {sub.plan.max_topics} analytics topics.",
+        )
 
     if topic_ids:
         valid_ids = (
@@ -98,15 +113,15 @@ async def update_analytics_profile(
         if len(valid_ids) != len(topic_ids):
             raise HTTPException(status_code=422, detail="One or more analytics topics are invalid.")
 
-    if payload.country_code is not None:
-        current_user.country_code = payload.country_code.upper() or None
-    if payload.region is not None:
+    if country_supplied:
+        current_user.country_code = payload.country_code.upper() if payload.country_code else None
+    if region_supplied:
         current_user.region = payload.region
-    if payload.city is not None:
+    if city_supplied:
         current_user.city = payload.city
-    if payload.primary_analytics_topic_id is not None:
-        current_user.primary_analytics_topic_id = payload.primary_analytics_topic_id
-    if payload.analytics_specialties is not None:
+    if primary_supplied:
+        current_user.primary_analytics_topic_id = primary_topic_id
+    if specialties_supplied or primary_supplied:
         current_user.analytics_specialties = topic_ids
 
         await db.execute(

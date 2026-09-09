@@ -22,7 +22,7 @@ def _distribution(values: Iterable[str | None]) -> list[dict[str, Any]]:
     if total == 0:
         return []
     return [
-        {"label": label, "count": count, "share": round(count / total, 3)}
+        {"label": label, "comments": count, "share": round(count / total, 3)}
         for label, count in counts.most_common()
     ]
 

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from app.api.deps import CurrentUser, DbSession, SuperAdminUser
-from app.models.models import AdminAuditLog, Topic, User, VerificationApplication
+from app.models.models import AdminAuditLog, User, VerificationApplication
 from app.schemas.verification import VerificationApplicationCreate, VerificationApplicationOut
 from app.services.subscriptions import require_analytics_access
 from app.services.professional_taxonomy import ROLE_MAP, validate_identity_selection
@@ -43,28 +43,15 @@ async def apply(
     if not role_codes:
         raise HTTPException(status_code=422, detail="Select at least one professional role before applying for verification.")
 
-    topic_ids = list(dict.fromkeys(payload.requested_topic_ids))
-    if payload.primary_topic_id is not None and payload.primary_topic_id not in topic_ids:
-        topic_ids.insert(0, payload.primary_topic_id)
-
-    if len(topic_ids) > sub.plan.max_topics:
+    # Verification is a professional-identity review. Analytics topic scope
+    # belongs to /user/analytics-profile and must never be changed as a side
+    # effect of a verification application. Keep the legacy request fields in
+    # the schema for compatibility, but reject their use explicitly.
+    if payload.primary_topic_id is not None or payload.requested_topic_ids:
         raise HTTPException(
             status_code=422,
-            detail=f"Your plan supports up to {sub.plan.max_topics} analytics topics.",
+            detail="Analytics topics are managed separately from professional verification.",
         )
-
-    if topic_ids:
-        count = (
-            await db.execute(select(Topic.id).where(Topic.id.in_(topic_ids)))
-        ).scalars().all()
-        if len(count) != len(topic_ids):
-            raise HTTPException(status_code=422, detail="One or more requested topics are invalid.")
-
-    primary_name = None
-    if payload.primary_topic_id is not None:
-        primary_name = (
-            await db.execute(select(Topic.name).where(Topic.id == payload.primary_topic_id))
-        ).scalar_one_or_none()
 
     primary_role = payload.primary_professional_role or role_codes[0]
     badge = ROLE_MAP[primary_role]["icon"]
@@ -86,8 +73,8 @@ async def apply(
             professional_role_codes=role_codes,
             primary_professional_role=primary_role,
             focus=payload.focus,
-            primary_topic_id=payload.primary_topic_id,
-            requested_topic_ids=topic_ids,
+            primary_topic_id=None,
+            requested_topic_ids=[],
             evidence=payload.evidence,
             status="PENDING",
             badge=badge,

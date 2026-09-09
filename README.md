@@ -216,10 +216,10 @@ The Expo app now includes:
 
 - `/analytics` — subscriber analytics dashboard.
 - `/subscription` — plan/trial and payment boundary screen.
-- `/analytics-profile` — professional identity, geography, primary topic and analytics-topic management.
+- `/analytics-profile` — geography, primary topic and analytics-topic management; professional identity is managed separately.
 - `/verification` — professional verification application/status.
 
-The analytics icon on each `PerceptionCard` opens `/analytics`. An authenticated user without analytics entitlement is redirected to `/subscription` by the analytics screen.
+The analytics icon on each `PerceptionCard` opens the perception-specific `/perceptions/{id}/analytics` intelligence surface. Author-level creator analytics are subscription-controlled; observer conversation intelligence remains separate from the creator entitlement. Profile Intelligence is exposed through `/analytics/profile`.
 
 Administrators (`ADMIN` / `SUPER_ADMIN`) can review verification applications through the verification admin endpoints. Approval writes the reviewed badge to the user; rejection does not grant a badge.
 

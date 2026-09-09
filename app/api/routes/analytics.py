@@ -165,8 +165,9 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
     previous_since = since - timedelta(days=days)
 
     topic_scope = await _topic_scope(db, current_user.id, sub.plan.max_topics)
-    current_filters = [Perception.created_at >= since]
+    current_filters = [Perception.user_id == current_user.id, Perception.created_at >= since]
     previous_filters = [
+        Perception.user_id == current_user.id,
         Perception.created_at >= previous_since,
         Perception.created_at < since,
     ]
@@ -602,7 +603,7 @@ async def analytics_intelligence(
     since = datetime.now(timezone.utc) - timedelta(days=days)
     topic_scope = await _topic_scope(db, current_user.id, sub.plan.max_topics)
 
-    filters = [Perception.created_at >= since, Perception.topic_id.is_not(None)]
+    filters = [Perception.user_id == current_user.id, Perception.created_at >= since, Perception.topic_id.is_not(None)]
     if topic_scope:
         filters.append(Perception.topic_id.in_(topic_scope))
 
@@ -866,18 +867,11 @@ async def perception_analytics(
         or 0
     )
 
-    ids = set(
-        (
-            await db.execute(
-                select(Like.user_id).where(
-                    Like.perception_id == p.id, Like.created_at >= since
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    ids.update(
+    # Audience perspective is conversation-derived: likes/views/shares are
+    # creator measurements, but they do not make someone a conversation
+    # participant. Keep the two populations separate so a perception with
+    # zero comments cannot report a non-zero conversational audience.
+    comment_participant_ids = set(
         (
             await db.execute(
                 select(Comment.user_id).where(
@@ -888,19 +882,7 @@ async def perception_analytics(
         .scalars()
         .all()
     )
-    ids.update(
-        (
-            await db.execute(
-                select(PerceptionInteraction.actor_user_id).where(
-                    PerceptionInteraction.perception_id == p.id,
-                    PerceptionInteraction.created_at >= since,
-                    PerceptionInteraction.actor_user_id.is_not(None),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+
 
     activity = (
         await db.execute(
@@ -916,9 +898,11 @@ async def perception_analytics(
             .order_by(func.date(PerceptionInteraction.created_at))
         )
     ).all()
+    # All audience breakdowns are commenter-derived. Semantic cohorts below
+    # are stricter still: they require analyzed comments.
     participants = (
-        await db.execute(select(User).where(User.id.in_(ids)))
-    ).scalars().all() if ids else []
+        await db.execute(select(User).where(User.id.in_(comment_participant_ids)))
+    ).scalars().all() if comment_participant_ids else []
 
     audience_minimum = MINIMUM_SAMPLE
     country_counts: dict[str, int] = {}
@@ -1063,7 +1047,7 @@ async def perception_analytics(
         },
         measurements=measurements,
         audience={
-            "unique_participants": len(ids),
+            "unique_participants": len(comment_participant_ids),
             "breakdown": {
                 "minimum": audience_minimum,
                 "available": audience_available,

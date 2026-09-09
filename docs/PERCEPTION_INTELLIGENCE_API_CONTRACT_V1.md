@@ -41,7 +41,7 @@ PerceptionIntelligence
 1. Topic is first-class context. A perception is always interpreted under its topic.
 2. `viewer_lens` separates author `creator_analytics` from observer `conversation_intelligence`.
 3. Creator-only measurements (`views`, `shares`, `engagement_rate`, and daily activity) are unavailable to observers.
-4. Audience breakdowns require at least 5 unique interacting participants.
+4. Audience breakdowns require at least 5 unique commenters in the selected period; likes, views, and shares do not make someone a conversation participant.
 5. Semantic intelligence requires at least 5 analyzed comments.
 6. Professional, geographic, and professional×geographic semantic cohorts independently require at least 5 analyzed comments.
 7. Geographic reporting uses country and region; city-level reporting is not exposed.

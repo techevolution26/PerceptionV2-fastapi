@@ -22,6 +22,7 @@ from app.services.professional_taxonomy import ROLE_MAP
 from app.models.models import (
     AnalyticsTopic,
     Comment,
+    CommentIntelligence,
     Follow,
     Like,
     Perception,
@@ -324,16 +325,38 @@ async def seed_demo() -> None:
                             professional_role_codes=list(user.professional_roles or []),
                             primary_professional_role=user.primary_professional_role,
                             focus=user.professional_focus or "General research",
-                            primary_topic_id=user.primary_analytics_topic_id,
-                            requested_topic_ids=[
-                                topics[name].id for name in selected_names
-                            ],
+                            primary_topic_id=None,
+                            requested_topic_ids=[],
                             evidence="Synthetic demo evidence for frontend testing.",
                             status="APPROVED",
                             badge="PROFESSIONAL",
                             reviewer_note="Demo seed record.",
                         )
                     )
+
+        # Subscription edge cases used by the release/entitlement tests.
+        # demo11 is expired; demo12 is past_due but still inside its paid period;
+        # demo13 is past_due with an expired period and must fail closed.
+        for user_index, code, status, period_end_offset in [
+            (11, "professional", "EXPIRED", -1),
+            (12, "professional", "past_due", 10),
+            (13, "professional", "past_due", -1),
+        ]:
+            user = users[user_index - 1]
+            plan = plans[code]
+            start = now - timedelta(days=45)
+            db.add(
+                Subscription(
+                    user_id=user.id,
+                    plan_id=plan.id,
+                    status=status,
+                    provider="demo_seed",
+                    starts_at=start,
+                    current_period_start=start,
+                    current_period_end=now + timedelta(days=period_end_offset),
+                    cancel_at_period_end=False,
+                )
+            )
 
         # ------------------------------------------------------------------
         # Topic follows + user follows
@@ -455,6 +478,145 @@ async def seed_demo() -> None:
         await db.flush()
 
         # ------------------------------------------------------------------
+        # Deterministic analytics fixtures. These deliberately exercise the
+        # boundaries the product contract depends on: a perception can have
+        # engagement without a conversation, while comment-derived audience
+        # and semantic intelligence only appear when comments exist. The first
+        # user receives a longitudinal portfolio spanning three 30-day buckets.
+        # ------------------------------------------------------------------
+        demo_owner = users[0]
+        scenario_specs = [
+            ("Business", 5, "Zero-comment fixture"),
+            ("Technology", 10, "Recent conversation fixture"),
+            ("Business", 45, "Mid-period conversation fixture"),
+            ("Education", 80, "Older conversation fixture"),
+            ("Economy", 40, "Four-comment threshold fixture"),
+        ]
+        scenario_perceptions: list[tuple[Perception, int, str]] = []
+        for topic_name, age_days, label in scenario_specs:
+            created_at = now - timedelta(days=age_days, hours=2)
+            perception = Perception(
+                user_id=demo_owner.id,
+                topic_id=topics[topic_name].id,
+                body=(
+                    f"{label}: a seeded proposition about {TOPIC_FOCUS[topic_name]}. "
+                    "This fixture exists to exercise Perception Intelligence and Profile Intelligence."
+                ),
+                created_at=created_at,
+                updated_at=created_at,
+            )
+            db.add(perception)
+            scenario_perceptions.append((perception, age_days, topic_name))
+        await db.flush()
+
+        # Zero-comment perception: 9 interaction actors, but zero commenters.
+        # The Perception Intelligence audience must therefore report zero
+        # conversation participants, even though creator metrics can see events.
+        zero_perception = scenario_perceptions[0][0]
+        for position, actor in enumerate(users[1:10]):
+            event_time = zero_perception.created_at + timedelta(hours=1 + position)
+            if event_time > now:
+                event_time = now - timedelta(minutes=position + 1)
+            db.add(Like(
+                user_id=actor.id,
+                perception_id=zero_perception.id,
+                created_at=event_time,
+                updated_at=event_time,
+            ))
+            day = event_time.replace(hour=0, minute=0, second=0, microsecond=0)
+            db.add(PerceptionInteraction(
+                actor_user_id=actor.id,
+                perception_id=zero_perception.id,
+                event_type="VIEW",
+                occurred_on=day,
+                created_at=event_time,
+            ))
+
+        # Rich conversation fixtures: six distinct commenters in each of three
+        # time buckets. The shared "access" theme makes cross-Topic recurrence
+        # deterministic; role and geography come from the seeded participants.
+        comment_specs = [
+            (scenario_perceptions[1][0], users[1:7], "access"),
+            (scenario_perceptions[2][0], users[7:13], "access"),
+            (scenario_perceptions[3][0], users[13:19], "access"),
+        ]
+        fixture_bodies = [
+            "I agree that access is the central issue in my experience.",
+            "I have seen a different outcome, especially around access.",
+            "What evidence would help us compare access across communities?",
+            "This is useful, but access depends on local conditions.",
+            "The proposal could improve access if implementation is practical.",
+            "I am concerned that access may remain uneven.",
+        ]
+        for perception, commenters, shared_theme in comment_specs:
+            parents: list[Comment] = []
+            for position, commenter in enumerate(commenters):
+                comment_time = perception.created_at + timedelta(hours=3 + position)
+                comment = Comment(
+                    user_id=commenter.id,
+                    perception_id=perception.id,
+                    body=fixture_bodies[position],
+                    created_at=comment_time,
+                    updated_at=comment_time,
+                )
+                db.add(comment)
+                parents.append(comment)
+            await db.flush()
+            # Add two replies to prove reply comments also participate in the
+            # comment/intelligence pipeline.
+            for position, parent in enumerate(parents[:2]):
+                commenter = users[19 + position]
+                reply_time = parent.created_at + timedelta(hours=2)
+                db.add(Comment(
+                    user_id=commenter.id,
+                    perception_id=perception.id,
+                    parent_comment_id=parent.id,
+                    body="That matches what I have observed about access too.",
+                    created_at=reply_time,
+                    updated_at=reply_time,
+                ))
+
+        threshold_perception = scenario_perceptions[4][0]
+        for position, commenter in enumerate(users[20:24]):
+            comment_time = threshold_perception.created_at + timedelta(hours=3 + position)
+            db.add(Comment(
+                user_id=commenter.id,
+                perception_id=threshold_perception.id,
+                body="A small-sample threshold fixture for analytics testing.",
+                created_at=comment_time,
+                updated_at=comment_time,
+            ))
+        await db.flush()
+
+        # Seed deterministic analyzed semantic evidence for the rich fixtures
+        # and all ordinary seeded comments. This makes frontend analytics tests
+        # independent of the external LLM provider and its rate limits.
+        all_comment_rows = (
+            await db.execute(
+                select(Comment.id, Comment.perception_id, Comment.created_at)
+                .where(Comment.perception_id.in_([p.id for p in perceptions] + [p.id for p, _, _ in scenario_perceptions]))
+            )
+        ).all()
+        semantic_themes = ["access", "trust", "adoption", "implementation"]
+        for position, (comment_id, _perception_id, comment_time) in enumerate(all_comment_rows):
+            db.add(CommentIntelligence(
+                comment_id=comment_id,
+                status="analyzed",
+                sentiment=["positive", "neutral", "mixed", "negative"][position % 4],
+                stance=["supportive", "challenging", "mixed", "unclear"][position % 4],
+                themes=[semantic_themes[position % len(semantic_themes)]],
+                is_question=position % 5 == 0,
+                has_concern=position % 4 == 3,
+                agreement_signal=position % 4 == 0,
+                disagreement_signal=position % 4 == 1,
+                quality_score=0.9,
+                model_version="demo-seed-v1",
+                analyzed_at=comment_time,
+            ))
+
+        await db.flush()
+
+        # ------------------------------------------------------------------
         # VIEW / SHARE events. These are the explicit analytics events used by
         # /api/analytics/overview. They are spread across the current period.
         # ------------------------------------------------------------------
@@ -488,9 +650,11 @@ async def seed_demo() -> None:
 
         print("\nDemo seed complete.")
         print(f"Users: {len(users)}")
-        print(f"Perceptions: {len(perceptions)}")
+        print(f"Perceptions: {len(perceptions) + len(scenario_perceptions)}")
         print("Likes/comments/views/shares: generated across all perceptions")
         print(f"Analytics accounts: {len(analytics_users)}")
+        print("Deterministic intelligence fixtures: zero-comment, rich-conversation, threshold, and longitudinal")
+        print("Subscription fixtures: demo11 expired, demo12 past_due-within-period, demo13 past_due-expired")
         print("\nFrontend test accounts:")
         print("  demo01@example.com  / Demo1234!  (Professional analytics)")
         print("  demo04@example.com  / Demo1234!  (Research analytics)")
