@@ -1014,8 +1014,11 @@ async def perception_analytics(
     if is_author:
         methodology_rules.insert(0, "Creator analytics require an analytics-enabled plan.")
 
+    patterns = composed["patterns"]
+    signals = composed["signals"]
+
     try:
-        decision = decision_context(intent=decision_intent, signals=[])
+        decision = decision_context(intent=decision_intent, signals=signals)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1076,8 +1079,8 @@ async def perception_analytics(
         },
         semantic=semantic,
         perspectives=perspective,
-        patterns=[],
-        signals=[],
+        patterns=patterns,
+        signals=signals,
         decision_context=decision,
         methodology={
             "sample_minimum": MINIMUM_SAMPLE,

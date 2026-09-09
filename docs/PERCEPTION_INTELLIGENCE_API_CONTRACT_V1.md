@@ -46,10 +46,11 @@ PerceptionIntelligence
 6. Professional, geographic, and professional×geographic semantic cohorts independently require at least 5 analyzed comments.
 7. Geographic reporting uses country and region; city-level reporting is not exposed.
 8. Individual participant identities are never returned by the intelligence contract.
-9. `patterns` and `signals` are explicit extension points. They remain empty until deterministic, evidence-backed pattern/signal generation is implemented.
+9. `patterns` and `signals` contain only deterministic, evidence-backed descriptive observations. They remain empty below the semantic sample minimum.
 10. `decision_context` changes framing intent only. It is evidence-invariant and does not establish causation or prediction.
 11. `methodology` travels with the result so consumers do not need to reconstruct analytical limitations separately.
 12. `schema_version` allows future contract evolution without silently changing the meaning of an existing response.
+13. Pattern and signal descriptions must remain scoped to the observed evidence and must not introduce causal or predictive claims.
 
 ## Semantic meanings
 

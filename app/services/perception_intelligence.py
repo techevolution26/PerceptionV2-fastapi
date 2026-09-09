@@ -229,6 +229,123 @@ def decision_context(
     }
 
 
+
+def derive_patterns_and_signals(
+    *,
+    semantic_evidence: dict[str, Any],
+    cross_lens_evidence: dict[str, Any],
+    minimum: int = MINIMUM_SAMPLE,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Derive only deterministic, descriptive patterns from qualified evidence.
+
+    This layer intentionally avoids causal, predictive, or motivational claims.
+    A pattern is emitted only when the underlying evidence envelope is qualified.
+    A signal is a compact observed statement backed by that same evidence.
+    """
+    if semantic_evidence.get("sample_size", 0) < minimum:
+        return [], []
+
+    evidence_items = {
+        item["type"]: item["observed"]
+        for item in semantic_evidence.get("evidence", [])
+        if isinstance(item, dict) and "type" in item
+    }
+    patterns: list[dict[str, Any]] = []
+    signals: list[dict[str, Any]] = []
+
+    def add(label: str, description: str, evidence_types: list[str]) -> None:
+        patterns.append({
+            "label": label,
+            "description": description,
+            "evidence_types": evidence_types,
+        })
+
+    sentiment = evidence_items.get("sentiment_distribution", [])
+    if sentiment:
+        dominant = sentiment[0]
+        add(
+            "Dominant sentiment",
+            f"{dominant['label'].replace('_', ' ').capitalize()} is the most common sentiment in the analyzed comments ({dominant['comments']} of {semantic_evidence['sample_size']}).",
+            ["sentiment_distribution"],
+        )
+
+    stance = evidence_items.get("stance_distribution", [])
+    if stance:
+        dominant = stance[0]
+        add(
+            "Dominant stance",
+            f"{dominant['label'].replace('_', ' ').capitalize()} is the most common stance in the analyzed comments ({dominant['comments']} of {semantic_evidence['sample_size']}).",
+            ["stance_distribution"],
+        )
+
+    themes = evidence_items.get("top_themes", [])
+    if themes:
+        top = themes[0]
+        add(
+            "Recurring theme",
+            f"The theme '{top['theme']}' occurs in {top['comments']} analyzed comments and is the most frequent recorded theme.",
+            ["top_themes"],
+        )
+
+    question_count = int(evidence_items.get("question_count", 0) or 0)
+    if question_count:
+        add(
+            "Question activity",
+            f"{question_count} analyzed comments contain a question signal.",
+            ["question_count"],
+        )
+
+    concern_themes = evidence_items.get("concern_themes", [])
+    if concern_themes:
+        top = concern_themes[0]
+        add(
+            "Concern theme",
+            f"'{top['theme']}' is the most frequent theme among comments carrying a concern signal ({top['comments']} comments).",
+            ["concern_themes"],
+        )
+
+    agreement = evidence_items.get("agreement_themes", [])
+    disagreement = evidence_items.get("disagreement_themes", [])
+    if agreement and disagreement:
+        add(
+            "Mixed response signals",
+            "The analyzed comments contain both agreement and disagreement signals, indicating a mixed response pattern within the observed discussion.",
+            ["agreement_themes", "disagreement_themes"],
+        )
+
+    cross_sample = cross_lens_evidence.get("sample_size", 0)
+    if cross_sample >= minimum:
+        professional = [
+            item for item in cross_lens_evidence.get("evidence", [])[0].get("observed", [])
+            if isinstance(item, dict)
+        ] if cross_lens_evidence.get("evidence") else []
+        geographic = [
+            item for item in cross_lens_evidence.get("evidence", [])[1].get("observed", [])
+            if isinstance(item, dict)
+        ] if len(cross_lens_evidence.get("evidence", [])) > 1 else []
+        if len(professional) >= 2 or len(geographic) >= 2:
+            add(
+                "Multiple qualifying perspectives",
+                "The discussion contains multiple professional or geographic cohorts that independently meet the minimum analytical sample.",
+                ["professional_perspectives", "geographic_perspectives"],
+            )
+
+    # Signals deliberately reuse pattern descriptions and carry the exact
+    # evidence sample/limitations instead of introducing stronger claims.
+    for pattern in patterns:
+        evidence = semantic_evidence
+        if any(kind in pattern["evidence_types"] for kind in ("professional_perspectives", "geographic_perspectives")):
+            evidence = cross_lens_evidence
+        signals.append({
+            "label": pattern["label"],
+            "description": pattern["description"],
+            "status": "observed_signal",
+            "sample_size": int(evidence.get("sample_size", 0)),
+            "limitations": evidence.get("limitations", []),
+        })
+
+    return patterns, signals
+
 def orchestrate_perception_intelligence(
     *,
     topic_id: int | None,
@@ -269,6 +386,11 @@ def orchestrate_perception_intelligence(
         professional_geographic_segments=cross_lens.get("professional_geographic_segments", []),
         minimum=minimum,
     )
+    patterns, signals = derive_patterns_and_signals(
+        semantic_evidence=semantic["semantic_evidence"],
+        cross_lens_evidence=cross,
+        minimum=minimum,
+    )
     return {
         "schema_version": INTELLIGENCE_SCHEMA_VERSION,
         "topic": {"id": topic_id, "name": topic_name},
@@ -276,4 +398,6 @@ def orchestrate_perception_intelligence(
         "period_days": period_days,
         "semantic": semantic,
         "cross_lens": cross,
+        "patterns": patterns,
+        "signals": signals,
     }
