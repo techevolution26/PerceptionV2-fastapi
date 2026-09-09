@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     SMTP_USE_SSL: bool = False
     RATE_LIMIT_FAIL_OPEN: bool = False
 
+    # --- Comment intelligence ---
+    COMMENT_INTELLIGENCE_ENABLED: bool = False
+    COMMENT_INTELLIGENCE_MODEL: str = "gpt-5.6-luna"
+    COMMENT_INTELLIGENCE_BATCH_SIZE: int = 10
+    COMMENT_INTELLIGENCE_INTERVAL_SECONDS: int = 60
+    COMMENT_INTELLIGENCE_DEFAULT_COOLDOWN_SECONDS: int = 60
+    COMMENT_INTELLIGENCE_MAX_COOLDOWN_SECONDS: int = 86400
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+
     @model_validator(mode="after")
     def validate_production_security(self):
         if self.ENVIRONMENT == "production":
@@ -64,6 +74,8 @@ class Settings(BaseSettings):
                 raise ValueError("SMTP_HOST and MAIL_FROM are required in production for account recovery")
             if not self.PASSWORD_RESET_URL.startswith(("https://", "perception://")):
                 raise ValueError("PASSWORD_RESET_URL must use https:// or perception:// in production")
+            if self.COMMENT_INTELLIGENCE_ENABLED and not self.OPENAI_API_KEY:
+                raise ValueError("OPENAI_API_KEY is required when comment intelligence is enabled in production")
         return self
 
     # --- Database ---
