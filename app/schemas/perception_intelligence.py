@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.decision_intelligence import DecisionIntelligence
+
 
 class IntelligenceAuthor(BaseModel):
     professional_role: str | None
@@ -224,5 +226,5 @@ class PerceptionIntelligence(BaseModel):
     temporal: TemporalIntelligence
     patterns: list[IntelligencePattern]
     signals: list[IntelligenceSignal]
-    decision_context: DecisionContext
+    decision_context: DecisionIntelligence
     methodology: IntelligenceMethodology

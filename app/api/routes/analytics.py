@@ -31,7 +31,8 @@ from app.schemas.business import (
 )
 from app.services.subscriptions import require_analytics_access
 from app.services.comment_cross_analysis import aggregate_professional_geographic_semantics
-from app.services.perception_intelligence import MINIMUM_SAMPLE, decision_context, orchestrate_perception_intelligence
+from app.services.perception_intelligence import MINIMUM_SAMPLE, orchestrate_perception_intelligence
+from app.services.decision_intelligence import build_decision_intelligence
 from app.schemas.perception_intelligence import PerceptionIntelligence
 from app.services.temporal_intelligence import build_temporal_intelligence
 from app.services.profile_intelligence import PROFILE_WINDOW_DAYS, build_profile_intelligence
@@ -1010,7 +1011,16 @@ async def perception_analytics(
     signals = composed["signals"]
 
     try:
-        decision = decision_context(intent=decision_intent, signals=signals)
+        decision = build_decision_intelligence(
+            intent=decision_intent,
+            patterns=patterns,
+            signals=signals,
+            cross_lens_analysis=composed["cross_lens_comparison"],
+            temporal={
+                "changes": temporal["changes"]
+            },
+            minimum=MINIMUM_SAMPLE,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

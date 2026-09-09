@@ -246,3 +246,7 @@ These outputs intentionally describe observed platform signals. They are not cla
 - Public profiles intentionally omit account email/role and expose only presentation and engagement information.
 - Messaging is limited to mutual follows for new conversations, supports bounded edit/recall windows, and keeps archive/delete state per user.
 - Super-admin control is protected by a separate short-lived admin token obtained through password re-authentication. Administrative user suspension/restoration is audited.
+
+## Decision Intelligence
+
+Perception Intelligence supports evidence-invariant decision framing through the optional `decision_intent` query parameter (`research`, `business`, `policy`, `journalism`, `education`, `product`, `professional`, or `general_exploration`). Decision framing reuses qualified observations and does not create causal, predictive, population-wide, or participant-level claims.
