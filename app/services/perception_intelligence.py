@@ -487,6 +487,8 @@ def orchestrate_perception_intelligence(
     semantic_rows: list[CommentIntelligence],
     participant_rows: list[tuple[CommentIntelligence, User]],
     cross_lens: dict[str, Any],
+    scope: str = "conversation_intelligence",
+    viewer_lens: str = "observer",
     minimum: int = MINIMUM_SAMPLE,
 ) -> dict[str, Any]:
     """Compose the deterministic v1 intelligence layers for one Perception.
@@ -528,6 +530,64 @@ def orchestrate_perception_intelligence(
         cross_lens_comparison=cross_lens_comparison,
         minimum=minimum,
     )
+
+    semantic_evidence = semantic["semantic_evidence"]
+    semantic_quality = semantic_evidence.get("quality_score")
+    common_limitations = semantic_evidence.get("limitations", [])
+
+    def provenance_for(evidence_types: list[str], source: str, sample_size: int, quality_score: float | None) -> dict[str, Any]:
+        qualified = sample_size >= minimum
+        return {
+            "source": source,
+            "evidence_types": evidence_types,
+            "sample_size": sample_size,
+            "period_start": period_start,
+            "period_end": period_end,
+            "scope": scope,
+            "viewer_lens": viewer_lens,
+            "quality_score": quality_score,
+            "qualification": (
+                f"Qualified because the evidence sample meets the minimum of {minimum} observations."
+                if qualified
+                else f"Not qualified because the evidence sample is below the minimum of {minimum} observations."
+            ),
+            "limitations": common_limitations,
+        }
+
+    semantic_provenance = provenance_for(
+        ["comment_semantics"],
+        "comment_intelligence",
+        int(semantic_evidence.get("sample_size", 0)),
+        semantic_quality,
+    )
+    cross_provenance = provenance_for(
+        ["professional_perspectives", "geographic_perspectives", "cross_lens_comparison"],
+        "cross_lens_analysis",
+        int(cross.get("sample_size", 0)),
+        None,
+    )
+
+    for pattern in patterns:
+        pattern["provenance"] = (
+            cross_provenance if any(kind in pattern.get("evidence_types", []) for kind in (
+                "professional_perspectives", "geographic_perspectives",
+                "cross_lens_convergence", "cross_lens_divergence",
+            )) else semantic_provenance
+        )
+    for signal in signals:
+        signal["provenance"] = (
+            cross_provenance if signal.get("label") in {
+                "Multiple qualifying perspectives", "Cross-lens convergence", "Cross-lens divergence"
+            } else semantic_provenance
+        )
+
+    root_provenance = provenance_for(
+        ["comment_semantics", "comment_participants", "cross_lens_analysis", "temporal_intelligence"],
+        "comment_intelligence",
+        len(semantic_rows),
+        semantic_quality,
+    )
+
     return {
         "schema_version": INTELLIGENCE_SCHEMA_VERSION,
         "topic": {"id": topic_id, "name": topic_name},
@@ -538,4 +598,5 @@ def orchestrate_perception_intelligence(
         "cross_lens_comparison": cross_lens_comparison,
         "patterns": patterns,
         "signals": signals,
+        "provenance": root_provenance,
     }

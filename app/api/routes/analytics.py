@@ -36,6 +36,7 @@ from app.services.decision_intelligence import build_decision_intelligence
 from app.schemas.perception_intelligence import PerceptionIntelligence
 from app.services.temporal_intelligence import build_temporal_intelligence
 from app.services.profile_intelligence import PROFILE_WINDOW_DAYS, build_profile_intelligence
+from app.services.intelligence_freshness import assess_intelligence_freshness
 from app.schemas.profile_intelligence import ProfileIntelligence
 from app.services.comment_intelligence import (
     get_comment_intelligence_participant_rows,
@@ -934,6 +935,7 @@ async def perception_analytics(
         ):
             role_label_by_code[str(code)] = label
 
+    freshness = await assess_intelligence_freshness(db, p.id, since)
     semantic_rows = await get_comment_intelligence_rows(db, p.id, since)
     temporal_rows = await get_comment_intelligence_temporal_rows(db, p.id, since)
     temporal = build_temporal_intelligence(temporal_rows, period_start=since, period_end=period_end, minimum=MINIMUM_SAMPLE)
@@ -954,6 +956,8 @@ async def perception_analytics(
         semantic_rows=semantic_rows,
         participant_rows=semantic_participant_rows,
         cross_lens=cross_analysis,
+        scope="creator_analytics" if is_author else "conversation_intelligence",
+        viewer_lens="author" if is_author else "observer",
         minimum=MINIMUM_SAMPLE,
     )
 
@@ -1055,6 +1059,8 @@ async def perception_analytics(
                 "verified": p.user.verification_status == "VERIFIED" and bool(p.user.verified_professional_roles),
             },
         },
+        provenance=composed["provenance"],
+        freshness=freshness,
         measurements=measurements,
         audience={
             "unique_participants": len(comment_participant_ids),

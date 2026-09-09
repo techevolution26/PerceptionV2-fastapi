@@ -142,10 +142,31 @@ class CrossLensComparisonAnalysis(BaseModel):
     note: str
 
 
+class IntelligenceProvenance(BaseModel):
+    source: Literal[
+        "comment_intelligence",
+        "comment_participants",
+        "cross_lens_analysis",
+        "temporal_intelligence",
+        "profile_intelligence",
+        "platform_measurements",
+    ]
+    evidence_types: list[str] = Field(default_factory=list)
+    sample_size: int
+    period_start: datetime
+    period_end: datetime
+    scope: Literal["creator_analytics", "conversation_intelligence"]
+    viewer_lens: Literal["author", "observer"]
+    quality_score: float | None = None
+    qualification: str
+    limitations: list[str] = Field(default_factory=list)
+
+
 class IntelligencePattern(BaseModel):
     label: str
     description: str
     evidence_types: list[str] = Field(default_factory=list)
+    provenance: IntelligenceProvenance
 
 
 class IntelligenceSignal(BaseModel):
@@ -154,6 +175,7 @@ class IntelligenceSignal(BaseModel):
     status: Literal["observed_signal"]
     sample_size: int
     limitations: list[str] = Field(default_factory=list)
+    provenance: IntelligenceProvenance
 
 
 class DecisionContext(BaseModel):
@@ -209,6 +231,18 @@ class TemporalIntelligence(BaseModel):
     limitations: list[str]
 
 
+class IntelligenceFreshness(BaseModel):
+    status: Literal["current", "pending", "stale"]
+    recalculation_required: bool
+    source_comment_count: int
+    analyzed_comment_count: int
+    pending_comment_count: int
+    failed_comment_count: int
+    latest_source_at: datetime | None
+    latest_analysis_at: datetime | None
+    note: str
+
+
 class IntelligenceMethodology(BaseModel):
     sample_minimum: int
     quality_score_definition: str
@@ -218,6 +252,8 @@ class IntelligenceMethodology(BaseModel):
 
 class PerceptionIntelligence(BaseModel):
     context: IntelligenceContext
+    provenance: IntelligenceProvenance
+    freshness: IntelligenceFreshness
     measurements: IntelligenceMeasurements
     audience: IntelligenceAudience
     semantic: SemanticIntelligence

@@ -9,6 +9,7 @@ from app.models.models import Comment, Perception, User
 from app.schemas.content import CommentOut
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
 from app.services.notifications import notify
+from app.services.comment_intelligence import upsert_comment_intelligence
 
 router = APIRouter(tags=["comments"])
 
@@ -195,6 +196,8 @@ async def create_comment(
     )
 
     db.add(comment)
+    await db.flush()
+    await upsert_comment_intelligence(db, comment_id=comment.id, status="pending")
 
     await db.commit()
 
@@ -306,6 +309,8 @@ async def create_reply(
     )
 
     db.add(reply)
+    await db.flush()
+    await upsert_comment_intelligence(db, comment_id=reply.id, status="pending")
 
     await db.commit()
 
