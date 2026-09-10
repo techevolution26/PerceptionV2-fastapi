@@ -93,10 +93,23 @@ async def list_comments(
 
     comments = list(result.scalars().all())
 
+    # Resolve the real perception owner id. `owner` above is a SQLAlchemy
+    # alias used by the query; it is not the owner User instance and must not
+    # be used for the Python-side viewer comparison.
+    owner_id = (
+        await db.execute(
+            select(Perception.user_id).where(Perception.id == perception_id)
+        )
+    ).scalar_one_or_none()
+
     show_ai_status = False
-    if viewer is not None and viewer.id == owner.id:
+    if viewer is not None and owner_id is not None and viewer.id == owner_id:
         subscription = await get_current_subscription(db, viewer.id)
-        show_ai_status = bool(subscription and subscription.plan and subscription.plan.analytics_enabled)
+        show_ai_status = bool(
+            subscription
+            and subscription.plan
+            and subscription.plan.analytics_enabled
+        )
 
     intelligence_result = await db.execute(
         select(CommentIntelligence.comment_id, CommentIntelligence.status).where(
@@ -247,6 +260,7 @@ async def create_comment(
 async def list_replies(
     comment_id: int,
     db: DbSession,
+    viewer: OptionalUser,
 ):
     """
     Return the replies belonging to a comment.
@@ -276,6 +290,24 @@ async def list_replies(
 
     reply_tree = list(comment.replies)
     all_replies = flatten(reply_tree)
+
+    owner_id = (
+        await db.execute(
+            select(Perception.user_id)
+            .join(Comment, Comment.perception_id == Perception.id)
+            .where(Comment.id == comment_id)
+        )
+    ).scalar_one_or_none()
+
+    show_ai_status = False
+    if viewer is not None and owner_id is not None and viewer.id == owner_id:
+        subscription = await get_current_subscription(db, viewer.id)
+        show_ai_status = bool(
+            subscription
+            and subscription.plan
+            and subscription.plan.analytics_enabled
+        )
+
     intelligence_result = await db.execute(
         select(CommentIntelligence.comment_id, CommentIntelligence.status).where(
             CommentIntelligence.comment_id.in_([reply.id for reply in all_replies])
