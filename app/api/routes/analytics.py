@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from math import sqrt
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy.orm import selectinload
 from sqlalchemy import distinct, func, select
 
@@ -29,7 +29,7 @@ from app.schemas.business import (
     AnalyticsTopicOut,
     AnalyticsTrendPoint,
 )
-from app.services.subscriptions import require_analytics_access
+from app.services.subscriptions import get_current_subscription, require_analytics_access
 from app.services.comment_cross_analysis import aggregate_professional_geographic_semantics
 from app.services.perception_intelligence import MINIMUM_SAMPLE, orchestrate_perception_intelligence
 from app.services.decision_intelligence import build_decision_intelligence
@@ -38,7 +38,11 @@ from app.services.temporal_intelligence import build_temporal_intelligence
 from app.services.profile_intelligence import PROFILE_WINDOW_DAYS, build_profile_intelligence
 from app.services.intelligence_freshness import assess_intelligence_freshness
 from app.services.intelligence_quality import assess_intelligence_quality
+from app.services.evidence_governance import assess_evidence_governance
+from app.services.semantic_model_governance import assess_semantic_model_governance
 from app.schemas.profile_intelligence import ProfileIntelligence
+from app.schemas.comparative_intelligence import ComparativeIntelligence
+from app.services.comparative_intelligence import COMPARISON_LIMIT, build_comparative_intelligence
 from app.services.comment_intelligence import (
     get_comment_intelligence_participant_rows,
     get_comment_intelligence_rows,
@@ -826,8 +830,8 @@ async def perception_analytics(
         raise HTTPException(404, "Perception not found")
 
     is_author = p.user_id == current_user.id
-    if is_author:
-        await require_analytics_access(db, current_user.id)
+    current_subscription = await get_current_subscription(db, current_user.id)
+    has_analytics_plan = bool(current_subscription and current_subscription.plan and current_subscription.plan.analytics_enabled)
 
     now = datetime.now(timezone.utc)
     period_end = now
@@ -939,6 +943,11 @@ async def perception_analytics(
     freshness = await assess_intelligence_freshness(db, p.id, since)
     quality = await assess_intelligence_quality(db, p.id, since, minimum=MINIMUM_SAMPLE)
     semantic_rows = await get_comment_intelligence_rows(db, p.id, since)
+    semantic_model_governance = assess_semantic_model_governance(semantic_rows, minimum_version_sample=MINIMUM_SAMPLE)
+    evidence_governance = assess_evidence_governance(analyzed_count=quality["analyzed_comment_count"], pending_count=quality["pending_comment_count"], failed_count=quality["failed_comment_count"], quality_status=quality["status"], quality_score=quality["quality_score"], freshness_status=freshness["status"], minimum=MINIMUM_SAMPLE)
+    access_tier = "full" if has_analytics_plan else "free_teaser"
+    upgrade_message = None if has_analytics_plan else "You are seeing a free taste of the strongest conversation intelligence. Subscribe to unlock deeper perspectives, cross-lens comparisons, temporal intelligence, and decision context."
+
     temporal_rows = await get_comment_intelligence_temporal_rows(db, p.id, since)
     temporal = build_temporal_intelligence(temporal_rows, period_start=since, period_end=period_end, minimum=MINIMUM_SAMPLE)
 
@@ -1015,6 +1024,17 @@ async def perception_analytics(
 
     patterns = composed["patterns"]
     signals = composed["signals"]
+    if not evidence_governance["patterns_eligible"]:
+        patterns=[]
+        signals=[]
+    elif not evidence_governance["signals_eligible"]:
+        signals=[]
+
+    if access_tier == "free_teaser":
+        patterns = patterns[:1]
+        signals = signals[:1]
+        perspective = {**perspective, "professional": [], "geographic": [], "cross_lens": []}
+        temporal = {**temporal, "buckets": [], "changes": [], "qualifying_bucket_count": 0}
 
     try:
         decision = build_decision_intelligence(
@@ -1030,19 +1050,30 @@ async def perception_analytics(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    if access_tier == "free_teaser":
+        decision = {
+            **decision,
+            "status": "teaser",
+            "summary": "A limited view of the strongest evidence-backed observation is available on the free plan.",
+            "observations": decision.get("observations", [])[:1],
+            "considerations": [],
+            "guardrail": decision.get("guardrail"),
+            "limitations": ["Subscribe to unlock deeper decision framing and comparative intelligence."],
+        }
+
     measurements = {
         "likes": {"value": likes, "available": True, "description": "Likes recorded during the selected period."},
         "comments": {"value": comments, "available": True, "description": "Comments recorded during the selected period."},
-        "views": {"value": views if is_author else None, "available": is_author, "description": "Views recorded during the selected period; creator-only."},
-        "shares": {"value": shares if is_author else None, "available": is_author, "description": "Shares recorded during the selected period; creator-only."},
+        "views": {"value": views if is_author and has_analytics_plan else None, "available": is_author and has_analytics_plan, "description": "Views recorded during the selected period; creator-only."},
+        "shares": {"value": shares if is_author and has_analytics_plan else None, "available": is_author and has_analytics_plan, "description": "Shares recorded during the selected period; creator-only."},
         "engagement_rate": {
-            "value": (round((likes + comments + shares) / views, 4) if views else 0.0) if is_author else None,
-            "available": is_author,
+            "value": (round((likes + comments + shares) / views, 4) if views else 0.0) if is_author and has_analytics_plan else None,
+            "available": is_author and has_analytics_plan,
             "description": "(likes + comments + shares) / views for the selected period; creator-only.",
         },
         "daily_activity": [
             {"date": str(d), "interactions": int(c)} for d, c in activity
-        ] if is_author else [],
+        ] if is_author and has_analytics_plan else [],
     }
 
     return PerceptionIntelligence(
@@ -1060,10 +1091,15 @@ async def perception_analytics(
                 "professional_role": p.user.primary_professional_role_label or p.user.profession,
                 "verified": p.user.verification_status == "VERIFIED" and bool(p.user.verified_professional_roles),
             },
+            "access_tier": access_tier,
+            "upgrade_available": not has_analytics_plan,
+            "upgrade_message": upgrade_message,
         },
         provenance=composed["provenance"],
         freshness=freshness,
         quality=quality,
+        evidence_governance=evidence_governance,
+        semantic_model_governance=semantic_model_governance,
         measurements=measurements,
         audience={
             "unique_participants": len(comment_participant_ids),
@@ -1103,6 +1139,46 @@ async def perception_analytics(
         },
     )
 
+
+
+@router.get("/compare", response_model=ComparativeIntelligence)
+async def compare_perceptions(
+    current_user: CurrentUser,
+    db: DbSession,
+    perception_ids: list[int] = Query(min_length=2, max_length=COMPARISON_LIMIT),
+    days: int = 30,
+    decision_intent: Literal[
+        "research", "business", "policy", "journalism", "education",
+        "product", "professional", "general_exploration"
+    ] = "general_exploration",
+):
+    await require_analytics_access(db, current_user.id)
+    if len(set(perception_ids)) != len(perception_ids):
+        raise HTTPException(422, "perception_ids must be unique")
+    days = max(7, min(days, 365))
+    perceptions = (
+        await db.execute(
+            select(Perception)
+            .options(selectinload(Perception.topic))
+            .where(Perception.user_id == current_user.id, Perception.id.in_(perception_ids))
+            .order_by(Perception.created_at.desc())
+        )
+    ).scalars().all()
+    if len(perceptions) != len(perception_ids):
+        raise HTTPException(404, "One or more perceptions were not found in your portfolio")
+
+    now = datetime.now(timezone.utc)
+    datasets: list[dict] = []
+    for perception in perceptions:
+        since = max(perception.created_at, now - timedelta(days=days))
+        rows = await get_comment_intelligence_rows(db, perception.id, since)
+        datasets.append({
+            "perception_id": perception.id,
+            "title": perception.body[:80],
+            "topic_name": perception.topic.name if perception.topic else None,
+            "rows": rows,
+        })
+    return build_comparative_intelligence(datasets, minimum=MINIMUM_SAMPLE, intent=decision_intent)
 
 
 @router.get("/profile", response_model=ProfileIntelligence)

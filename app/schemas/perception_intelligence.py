@@ -22,6 +22,9 @@ class IntelligenceContext(BaseModel):
     scope: Literal["creator_analytics", "conversation_intelligence"]
     viewer_lens: Literal["author", "observer"]
     author: IntelligenceAuthor
+    access_tier: Literal["full", "free_teaser"]
+    upgrade_available: bool
+    upgrade_message: str | None
 
 
 class IntelligenceMeasurement(BaseModel):
@@ -143,6 +146,8 @@ class CrossLensComparisonAnalysis(BaseModel):
 
 
 class IntelligenceProvenance(BaseModel):
+    trace_id: str
+    evidence_chain: list[str] = Field(default_factory=list)
     source: Literal[
         "comment_intelligence",
         "comment_participants",
@@ -256,6 +261,32 @@ class IntelligenceFreshness(BaseModel):
     note: str
 
 
+class SemanticModelGovernance(BaseModel):
+    status: Literal["stable", "review_required", "insufficient_sample"]
+    active_model_versions: list[dict] = Field(default_factory=list)
+    baseline_model_version: str | None
+    latest_model_version: str | None
+    compared_sample_size: int
+    distribution_shifts: list[dict] = Field(default_factory=list)
+    note: str
+    limitations: list[str] = Field(default_factory=list)
+
+
+class EvidenceGovernance(BaseModel):
+    status: Literal["eligible", "provisional", "restricted"]
+    minimum_sample: int
+    analyzed_comment_count: int
+    pending_comment_count: int
+    failed_comment_count: int
+    quality_threshold: float
+    quality_score: float | None
+    freshness_status: Literal["current", "pending", "stale"]
+    patterns_eligible: bool
+    signals_eligible: bool
+    reasons: list[str] = Field(default_factory=list)
+    rules: list[str] = Field(default_factory=list)
+
+
 class IntelligenceMethodology(BaseModel):
     sample_minimum: int
     quality_score_definition: str
@@ -268,6 +299,8 @@ class PerceptionIntelligence(BaseModel):
     provenance: IntelligenceProvenance
     freshness: IntelligenceFreshness
     quality: IntelligenceQuality
+    evidence_governance: EvidenceGovernance
+    semantic_model_governance: SemanticModelGovernance
     measurements: IntelligenceMeasurements
     audience: IntelligenceAudience
     semantic: SemanticIntelligence

@@ -7,6 +7,7 @@ stable, evidence-scoped intelligence envelope.
 from __future__ import annotations
 
 from collections import Counter
+import hashlib
 from datetime import datetime
 from typing import Any, Iterable
 
@@ -537,20 +538,15 @@ def orchestrate_perception_intelligence(
 
     def provenance_for(evidence_types: list[str], source: str, sample_size: int, quality_score: float | None) -> dict[str, Any]:
         qualified = sample_size >= minimum
+        canonical = "|".join([str(perception_id), source, ",".join(sorted(evidence_types)), period_start.isoformat(), period_end.isoformat(), scope, viewer_lens, str(sample_size)])
+        trace_id = "pi-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
         return {
-            "source": source,
-            "evidence_types": evidence_types,
-            "sample_size": sample_size,
-            "period_start": period_start,
-            "period_end": period_end,
-            "scope": scope,
-            "viewer_lens": viewer_lens,
+            "trace_id": trace_id,
+            "evidence_chain": ["human_responses", "comment_intelligence", *evidence_types],
+            "source": source, "evidence_types": evidence_types, "sample_size": sample_size,
+            "period_start": period_start, "period_end": period_end, "scope": scope, "viewer_lens": viewer_lens,
             "quality_score": quality_score,
-            "qualification": (
-                f"Qualified because the evidence sample meets the minimum of {minimum} observations."
-                if qualified
-                else f"Not qualified because the evidence sample is below the minimum of {minimum} observations."
-            ),
+            "qualification": (f"Qualified because the evidence sample meets the minimum of {minimum} observations." if qualified else f"Not qualified because the evidence sample is below the minimum of {minimum} observations."),
             "limitations": common_limitations,
         }
 

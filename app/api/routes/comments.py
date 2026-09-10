@@ -4,12 +4,13 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import aliased, noload, selectinload
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, OptionalUser
 from app.models.models import Comment, CommentIntelligence, Perception, User
 from app.schemas.content import CommentOut
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
 from app.services.notifications import notify
 from app.services.comment_intelligence import upsert_comment_intelligence
+from app.services.subscriptions import get_current_subscription
 
 router = APIRouter(tags=["comments"])
 
@@ -62,6 +63,7 @@ def _load_options():
 async def list_comments(
     perception_id: int,
     db: DbSession,
+    viewer: OptionalUser,
 ):
     """
     Return the complete comment tree for a perception.
@@ -91,6 +93,11 @@ async def list_comments(
 
     comments = list(result.scalars().all())
 
+    show_ai_status = False
+    if viewer is not None and viewer.id == owner.id:
+        subscription = await get_current_subscription(db, viewer.id)
+        show_ai_status = bool(subscription and subscription.plan and subscription.plan.analytics_enabled)
+
     intelligence_result = await db.execute(
         select(CommentIntelligence.comment_id, CommentIntelligence.status).where(
             CommentIntelligence.comment_id.in_([comment.id for comment in comments])
@@ -113,7 +120,7 @@ async def list_comments(
             media_url=comment.media_url,
             created_at=comment.created_at,
             user=comment.user,
-            ai_analysis_status=intelligence_status.get(comment.id),
+            ai_analysis_status=intelligence_status.get(comment.id) if show_ai_status else None,
             replies=[build_comment(reply) for reply in children.get(comment.id, [])],
         )
 
@@ -285,7 +292,7 @@ async def list_replies(
             media_url=reply.media_url,
             created_at=reply.created_at,
             user=reply.user,
-            ai_analysis_status=intelligence_status.get(reply.id),
+            ai_analysis_status=intelligence_status.get(reply.id) if show_ai_status else None,
             replies=[build_reply(child) for child in reply.replies],
         )
 
