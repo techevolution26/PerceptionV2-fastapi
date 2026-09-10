@@ -231,6 +231,19 @@ class TemporalIntelligence(BaseModel):
     limitations: list[str]
 
 
+class IntelligenceQuality(BaseModel):
+    status: Literal["not_ready", "available"]
+    analyzed_comment_count: int
+    quality_score: float | None
+    low_quality_comment_count: int
+    low_quality_share: float | None
+    failed_comment_count: int
+    pending_comment_count: int
+    model_versions: list[dict] = Field(default_factory=list)
+    note: str
+    limitations: list[str] = Field(default_factory=list)
+
+
 class IntelligenceFreshness(BaseModel):
     status: Literal["current", "pending", "stale"]
     recalculation_required: bool
@@ -254,6 +267,7 @@ class PerceptionIntelligence(BaseModel):
     context: IntelligenceContext
     provenance: IntelligenceProvenance
     freshness: IntelligenceFreshness
+    quality: IntelligenceQuality
     measurements: IntelligenceMeasurements
     audience: IntelligenceAudience
     semantic: SemanticIntelligence

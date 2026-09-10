@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import aliased, noload, selectinload
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.models import Comment, Perception, User
+from app.models.models import Comment, CommentIntelligence, Perception, User
 from app.schemas.content import CommentOut
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
 from app.services.notifications import notify
@@ -89,7 +89,14 @@ async def list_comments(
         .order_by(Comment.created_at.asc())
     )
 
-    comments = result.scalars().all()
+    comments = list(result.scalars().all())
+
+    intelligence_result = await db.execute(
+        select(CommentIntelligence.comment_id, CommentIntelligence.status).where(
+            CommentIntelligence.comment_id.in_([comment.id for comment in comments])
+        )
+    )
+    intelligence_status = {comment_id: status for comment_id, status in intelligence_result.all()}
 
     # Parent ID -> child comments
     children: dict[int | None, list[Comment]] = {}
@@ -106,6 +113,7 @@ async def list_comments(
             media_url=comment.media_url,
             created_at=comment.created_at,
             user=comment.user,
+            ai_analysis_status=intelligence_status.get(comment.id),
             replies=[build_comment(reply) for reply in children.get(comment.id, [])],
         )
 
@@ -218,6 +226,7 @@ async def create_comment(
     )
 
     created_comment = result.scalar_one()
+    created_comment.ai_analysis_status = "pending"
     owner_id = (await db.execute(select(Perception.user_id).where(Perception.id == perception_id))).scalar_one()
     if owner_id != current_user.id:
         await notify(db, user_id=owner_id, ntype="perception_comment", data={"perception_id": perception_id, "comment_id": comment.id, "actor_id": current_user.id, "actor_name": current_user.name}, commit=True)
@@ -251,7 +260,36 @@ async def list_replies(
             detail="Comment not found",
         )
 
-    return comment.replies
+    def flatten(items: list[Comment]) -> list[Comment]:
+        result: list[Comment] = []
+        for item in items:
+            result.append(item)
+            result.extend(flatten(item.replies))
+        return result
+
+    reply_tree = list(comment.replies)
+    all_replies = flatten(reply_tree)
+    intelligence_result = await db.execute(
+        select(CommentIntelligence.comment_id, CommentIntelligence.status).where(
+            CommentIntelligence.comment_id.in_([reply.id for reply in all_replies])
+        )
+    )
+    intelligence_status = {comment_id: status for comment_id, status in intelligence_result.all()}
+
+    def build_reply(reply: Comment) -> CommentOut:
+        return CommentOut(
+            id=reply.id,
+            perception_id=reply.perception_id,
+            parent_comment_id=reply.parent_comment_id,
+            body=reply.body,
+            media_url=reply.media_url,
+            created_at=reply.created_at,
+            user=reply.user,
+            ai_analysis_status=intelligence_status.get(reply.id),
+            replies=[build_reply(child) for child in reply.replies],
+        )
+
+    return [build_reply(reply) for reply in reply_tree]
 
 
 @router.post(
@@ -329,6 +367,7 @@ async def create_reply(
     )
 
     created_reply = result.scalar_one()
+    created_reply.ai_analysis_status = "pending"
     if parent_comment.user_id != current_user.id:
         await notify(db, user_id=parent_comment.user_id, ntype="comment_reply", data={"perception_id": parent_comment.perception_id, "comment_id": reply.id, "actor_id": current_user.id, "actor_name": current_user.name}, commit=True)
     return created_reply

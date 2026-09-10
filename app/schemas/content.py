@@ -1,5 +1,6 @@
 # app/schemas/content.py
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,6 +55,7 @@ class CommentOut(BaseModel):
     media_url: str | None = None
     created_at: datetime
     user: UserSlim
+    ai_analysis_status: Literal["pending", "analyzed", "failed"] | None = None
     replies: list["CommentOut"] = Field(default_factory=list)
 
 
