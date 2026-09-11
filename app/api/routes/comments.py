@@ -93,22 +93,14 @@ async def list_comments(
 
     comments = list(result.scalars().all())
 
-    # Resolve the real perception owner id. `owner` above is a SQLAlchemy
-    # alias used by the query; it is not the owner User instance and must not
-    # be used for the Python-side viewer comparison.
-    owner_id = (
-        await db.execute(
-            select(Perception.user_id).where(Perception.id == perception_id)
-        )
-    ).scalar_one_or_none()
-
+    owner_id = await db.scalar(
+        select(Perception.user_id).where(Perception.id == perception_id)
+    )
     show_ai_status = False
-    if viewer is not None and owner_id is not None and viewer.id == owner_id:
+    if viewer is not None and owner_id == viewer.id:
         subscription = await get_current_subscription(db, viewer.id)
         show_ai_status = bool(
-            subscription
-            and subscription.plan
-            and subscription.plan.analytics_enabled
+            subscription and subscription.plan and subscription.plan.analytics_enabled
         )
 
     intelligence_result = await db.execute(
@@ -116,7 +108,9 @@ async def list_comments(
             CommentIntelligence.comment_id.in_([comment.id for comment in comments])
         )
     )
-    intelligence_status = {comment_id: status for comment_id, status in intelligence_result.all()}
+    intelligence_status = {
+        comment_id: status for comment_id, status in intelligence_result.all()
+    }
 
     # Parent ID -> child comments
     children: dict[int | None, list[Comment]] = {}
@@ -133,7 +127,9 @@ async def list_comments(
             media_url=comment.media_url,
             created_at=comment.created_at,
             user=comment.user,
-            ai_analysis_status=intelligence_status.get(comment.id) if show_ai_status else None,
+            ai_analysis_status=(
+                intelligence_status.get(comment.id) if show_ai_status else None
+            ),
             replies=[build_comment(reply) for reply in children.get(comment.id, [])],
         )
 
@@ -147,7 +143,6 @@ async def list_comments(
     )
 
     return [build_comment(comment) for comment in root_comments]
-
 
 
 @router.post(
@@ -178,8 +173,11 @@ async def create_comment(
 
     # Verify that the perception exists.
     perception_exists = await db.execute(
-        select(Perception.id).join(User, User.id == Perception.user_id).where(
-            Perception.id == perception_id, User.is_active.is_(True),
+        select(Perception.id)
+        .join(User, User.id == Perception.user_id)
+        .where(
+            Perception.id == perception_id,
+            User.is_active.is_(True),
         )
     )
 
@@ -247,9 +245,24 @@ async def create_comment(
 
     created_comment = result.scalar_one()
     created_comment.ai_analysis_status = "pending"
-    owner_id = (await db.execute(select(Perception.user_id).where(Perception.id == perception_id))).scalar_one()
+    owner_id = (
+        await db.execute(
+            select(Perception.user_id).where(Perception.id == perception_id)
+        )
+    ).scalar_one()
     if owner_id != current_user.id:
-        await notify(db, user_id=owner_id, ntype="perception_comment", data={"perception_id": perception_id, "comment_id": comment.id, "actor_id": current_user.id, "actor_name": current_user.name}, commit=True)
+        await notify(
+            db,
+            user_id=owner_id,
+            ntype="perception_comment",
+            data={
+                "perception_id": perception_id,
+                "comment_id": comment.id,
+                "actor_id": current_user.id,
+                "actor_name": current_user.name,
+            },
+            commit=True,
+        )
     return created_comment
 
 
@@ -281,6 +294,16 @@ async def list_replies(
             detail="Comment not found",
         )
 
+    owner_id = await db.scalar(
+        select(Perception.user_id).where(Perception.id == comment.perception_id)
+    )
+    show_ai_status = False
+    if viewer is not None and owner_id == viewer.id:
+        subscription = await get_current_subscription(db, viewer.id)
+        show_ai_status = bool(
+            subscription and subscription.plan and subscription.plan.analytics_enabled
+        )
+
     def flatten(items: list[Comment]) -> list[Comment]:
         result: list[Comment] = []
         for item in items:
@@ -290,30 +313,14 @@ async def list_replies(
 
     reply_tree = list(comment.replies)
     all_replies = flatten(reply_tree)
-
-    owner_id = (
-        await db.execute(
-            select(Perception.user_id)
-            .join(Comment, Comment.perception_id == Perception.id)
-            .where(Comment.id == comment_id)
-        )
-    ).scalar_one_or_none()
-
-    show_ai_status = False
-    if viewer is not None and owner_id is not None and viewer.id == owner_id:
-        subscription = await get_current_subscription(db, viewer.id)
-        show_ai_status = bool(
-            subscription
-            and subscription.plan
-            and subscription.plan.analytics_enabled
-        )
-
     intelligence_result = await db.execute(
         select(CommentIntelligence.comment_id, CommentIntelligence.status).where(
             CommentIntelligence.comment_id.in_([reply.id for reply in all_replies])
         )
     )
-    intelligence_status = {comment_id: status for comment_id, status in intelligence_result.all()}
+    intelligence_status = {
+        comment_id: status for comment_id, status in intelligence_result.all()
+    }
 
     def build_reply(reply: Comment) -> CommentOut:
         return CommentOut(
@@ -324,7 +331,9 @@ async def list_replies(
             media_url=reply.media_url,
             created_at=reply.created_at,
             user=reply.user,
-            ai_analysis_status=intelligence_status.get(reply.id) if show_ai_status else None,
+            ai_analysis_status=(
+                intelligence_status.get(reply.id) if show_ai_status else None
+            ),
             replies=[build_reply(child) for child in reply.replies],
         )
 
@@ -408,7 +417,18 @@ async def create_reply(
     created_reply = result.scalar_one()
     created_reply.ai_analysis_status = "pending"
     if parent_comment.user_id != current_user.id:
-        await notify(db, user_id=parent_comment.user_id, ntype="comment_reply", data={"perception_id": parent_comment.perception_id, "comment_id": reply.id, "actor_id": current_user.id, "actor_name": current_user.name}, commit=True)
+        await notify(
+            db,
+            user_id=parent_comment.user_id,
+            ntype="comment_reply",
+            data={
+                "perception_id": parent_comment.perception_id,
+                "comment_id": reply.id,
+                "actor_id": current_user.id,
+                "actor_name": current_user.name,
+            },
+            commit=True,
+        )
     return created_reply
 
 
