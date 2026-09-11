@@ -77,6 +77,12 @@ class User(TimestampMixin, Base):
     )
     token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notification_preferences: Mapped[dict] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    privacy_preferences: Mapped[dict] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
 
     @property
     def primary_professional_role_label(self) -> str | None:

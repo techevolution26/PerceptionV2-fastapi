@@ -1053,7 +1053,10 @@ async def perception_analytics(
     if access_tier == "free_teaser":
         decision = {
             **decision,
-            "status": "teaser",
+            # The API contract intentionally has only available/insufficient_sample.
+            # Free-tier limitation is expressed through the summary/limitations,
+            # not by inventing a third decision status.
+            "status": "available" if decision.get("observations") else "insufficient_sample",
             "summary": "A limited view of the strongest evidence-backed observation is available on the free plan.",
             "observations": decision.get("observations", [])[:1],
             "considerations": [],

@@ -61,8 +61,6 @@ async def apply(
     current_user.professional_industries = industry_codes
     current_user.professional_roles = role_codes
     current_user.primary_professional_role = primary_role
-    current_user.primary_analytics_topic_id = payload.primary_topic_id
-    current_user.analytics_specialties = topic_ids
     current_user.verification_status = "PENDING"
 
     db.add(

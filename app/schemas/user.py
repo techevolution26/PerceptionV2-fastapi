@@ -46,6 +46,8 @@ class UserMe(UserPublic):
     city: str | None = None
     analytics_specialties: list[int] = Field(default_factory=list)
     primary_analytics_topic_id: int | None = None
+    notification_preferences: dict[str, bool] = Field(default_factory=dict)
+    privacy_preferences: dict[str, str | bool] = Field(default_factory=dict)
 
 
 class UserSlim(BaseModel):
@@ -154,3 +156,8 @@ class ChangePasswordRequest(BaseModel):
         ):
             raise ValueError("Password must contain uppercase, lowercase, number, and special character.")
         return value
+
+
+class UserPreferencesUpdate(BaseModel):
+    notification_preferences: dict[str, bool] | None = None
+    privacy_preferences: dict[str, str | bool] | None = None

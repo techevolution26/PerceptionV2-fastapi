@@ -7,7 +7,7 @@ from app.api.deps import CurrentUser, DbSession, OptionalUser
 from app.models.models import AnalyticsTopic, Comment, Follow, Like, Message, Perception, Topic, TopicFollow, User
 from app.schemas.content import PerceptionOut, TopicOut
 from app.schemas.business import AnalyticsProfileUpdate
-from app.schemas.user import UpdateMeRequest, UserMe, UserProfile, UserSlim
+from app.schemas.user import UpdateMeRequest, UserMe, UserProfile, UserSlim, UserPreferencesUpdate
 from app.services.storage import ALLOWED_IMAGE_TYPES, save_upload
 from app.services.subscriptions import require_analytics_access
 from app.services.notifications import notify
@@ -44,6 +44,32 @@ async def professional_taxonomy():
 
 @router.get("/user", response_model=UserMe)
 async def get_me(current_user: CurrentUser):
+    return current_user
+
+
+@router.get("/user/preferences", response_model=UserMe)
+async def get_preferences(current_user: CurrentUser):
+    return current_user
+
+
+@router.put("/user/preferences", response_model=UserMe)
+async def update_preferences(
+    payload: UserPreferencesUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    if payload.notification_preferences is not None:
+        current_user.notification_preferences = {
+            **dict(current_user.notification_preferences or {}),
+            **payload.notification_preferences,
+        }
+    if payload.privacy_preferences is not None:
+        current_user.privacy_preferences = {
+            **dict(current_user.privacy_preferences or {}),
+            **payload.privacy_preferences,
+        }
+    await db.commit()
+    await db.refresh(current_user)
     return current_user
 
 

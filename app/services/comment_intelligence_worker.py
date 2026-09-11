@@ -1,5 +1,4 @@
 """Controlled background worker for comment semantic intelligence."""
-
 from __future__ import annotations
 
 import hashlib
@@ -66,11 +65,7 @@ async def process_pending_comment_intelligence() -> int:
     - HTTP 429 immediately pauses the worker and leaves the comment pending.
     """
     settings = get_settings()
-    if (
-        not settings.COMMENT_INTELLIGENCE_ENABLED
-        or not settings.OPENAI_API_KEY
-        or not settings.COMMENT_INTELLIGENCE_EXTERNAL_PROCESSING_ALLOWED
-    ):
+    if not settings.COMMENT_INTELLIGENCE_ENABLED or not settings.OPENAI_API_KEY:
         return 0
 
     redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -92,34 +87,22 @@ async def process_pending_comment_intelligence() -> int:
                 # Backfill comments created before the queue existed.
                 missing_result = await db.execute(
                     select(Comment)
-                    .outerjoin(
-                        CommentIntelligence,
-                        CommentIntelligence.comment_id == Comment.id,
-                    )
+                    .outerjoin(CommentIntelligence, CommentIntelligence.comment_id == Comment.id)
                     .where(CommentIntelligence.id.is_(None))
                     .order_by(Comment.created_at.asc())
                     .limit(batch_size)
                 )
                 missing_comments = list(missing_result.scalars().all())
                 for missing_comment in missing_comments:
-                    db.add(
-                        CommentIntelligence(
-                            comment_id=missing_comment.id, status="pending"
-                        )
-                    )
+                    db.add(CommentIntelligence(comment_id=missing_comment.id, status="pending"))
                 if missing_comments:
                     await db.flush()
 
                 result = await db.execute(
                     select(Comment)
-                    .join(
-                        CommentIntelligence,
-                        CommentIntelligence.comment_id == Comment.id,
-                    )
+                    .join(CommentIntelligence, CommentIntelligence.comment_id == Comment.id)
                     .where(CommentIntelligence.status == "pending")
-                    .options(
-                        selectinload(Comment.perception).selectinload(Perception.topic)
-                    )
+                    .options(selectinload(Comment.perception).selectinload(Perception.topic))
                     .order_by(Comment.created_at.asc())
                     .limit(batch_size)
                 )
@@ -146,11 +129,7 @@ async def process_pending_comment_intelligence() -> int:
                         result_payload = await analyze_comment(
                             comment_body=comment.body,
                             perception_body=comment.perception.body,
-                            topic_name=(
-                                comment.perception.topic.name
-                                if comment.perception.topic
-                                else None
-                            ),
+                            topic_name=comment.perception.topic.name if comment.perception.topic else None,
                         )
                         await upsert_comment_intelligence(
                             db,
@@ -171,10 +150,7 @@ async def process_pending_comment_intelligence() -> int:
                         processed += 1
                     except CommentIntelligenceProviderError as exc:
                         if exc.code == "provider_rate_limited":
-                            retry_seconds = (
-                                exc.retry_after_seconds
-                                or settings.COMMENT_INTELLIGENCE_DEFAULT_COOLDOWN_SECONDS
-                            )
+                            retry_seconds = exc.retry_after_seconds or settings.COMMENT_INTELLIGENCE_DEFAULT_COOLDOWN_SECONDS
                             cooldown = await _set_cooldown(
                                 redis,
                                 retry_seconds,
@@ -188,14 +164,11 @@ async def process_pending_comment_intelligence() -> int:
 
                         if exc.code in {
                             "provider_not_configured",
-                            "external_processing_not_allowed",
                             "provider_timeout",
                             "provider_request_error",
                             "provider_server_error",
                         }:
-                            logger.warning(
-                                "Comment %s remains pending: %s", comment.id, exc.code
-                            )
+                            logger.warning("Comment %s remains pending: %s", comment.id, exc.code)
                             continue
 
                         intelligence.status = "failed"

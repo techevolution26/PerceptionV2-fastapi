@@ -1,5 +1,4 @@
 """Provider adapter for controlled per-comment semantic analysis."""
-
 from __future__ import annotations
 
 import json
@@ -17,19 +16,9 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "sentiment": {
-            "type": "string",
-            "enum": ["positive", "negative", "neutral", "mixed", "unclear"],
-        },
-        "stance": {
-            "type": "string",
-            "enum": ["supportive", "challenging", "mixed", "unclear"],
-        },
-        "themes": {
-            "type": "array",
-            "items": {"type": "string", "maxLength": 80},
-            "maxItems": 10,
-        },
+        "sentiment": {"type": "string", "enum": ["positive", "negative", "neutral", "mixed", "unclear"]},
+        "stance": {"type": "string", "enum": ["supportive", "challenging", "mixed", "unclear"]},
+        "themes": {"type": "array", "items": {"type": "string", "maxLength": 80}, "maxItems": 10},
         "is_question": {"type": "boolean"},
         "has_concern": {"type": "boolean"},
         "agreement_signal": {"type": "boolean"},
@@ -37,14 +26,8 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "quality_score": {"type": "number", "minimum": 0, "maximum": 1},
     },
     "required": [
-        "sentiment",
-        "stance",
-        "themes",
-        "is_question",
-        "has_concern",
-        "agreement_signal",
-        "disagreement_signal",
-        "quality_score",
+        "sentiment", "stance", "themes", "is_question", "has_concern",
+        "agreement_signal", "disagreement_signal", "quality_score",
     ],
 }
 
@@ -61,31 +44,6 @@ Rules:
 - If evidence is weak, use unclear and lower quality_score.
 - Return only the structured result.
 """
-
-
-def build_analysis_input(
-    *, comment_body: str, perception_body: str, topic_name: str | None
-) -> list[dict[str, object]]:
-    """Build the minimal third-party AI payload without participant identity fields."""
-    return [
-        {
-            "role": "developer",
-            "content": [{"type": "input_text", "text": SYSTEM_PROMPT}],
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": (
-                        f"Perception topic: {(topic_name or 'unspecified').strip()[:200]}\n\n"
-                        f"Perception: {perception_body.strip()[:6000]}\n\n"
-                        f"Comment: {comment_body.strip()[:6000]}"
-                    ),
-                }
-            ],
-        },
-    ]
 
 
 class CommentIntelligenceProviderError(RuntimeError):
@@ -114,25 +72,14 @@ def validate_analysis_result(result: object) -> dict[str, Any]:
         raise CommentIntelligenceProviderError("invalid_provider_schema")
     if not isinstance(themes, list) or len(themes) > 10:
         raise CommentIntelligenceProviderError("invalid_provider_schema")
-    if any(
-        not isinstance(theme, str) or not theme.strip() or len(theme.strip()) > 80
-        for theme in themes
-    ):
+    if any(not isinstance(theme, str) or not theme.strip() or len(theme.strip()) > 80 for theme in themes):
         raise CommentIntelligenceProviderError("invalid_provider_schema")
-    for key in (
-        "is_question",
-        "has_concern",
-        "agreement_signal",
-        "disagreement_signal",
-    ):
+    for key in ("is_question", "has_concern", "agreement_signal", "disagreement_signal"):
         if not isinstance(result.get(key), bool):
             raise CommentIntelligenceProviderError("invalid_provider_schema")
     if isinstance(quality_score, bool) or not isinstance(quality_score, (int, float)):
         raise CommentIntelligenceProviderError("invalid_provider_schema")
-    if (
-        not math.isfinite(float(quality_score))
-        or not 0.0 <= float(quality_score) <= 1.0
-    ):
+    if not math.isfinite(float(quality_score)) or not 0.0 <= float(quality_score) <= 1.0:
         raise CommentIntelligenceProviderError("invalid_provider_schema")
 
     return {
@@ -181,31 +128,28 @@ def _retry_after_seconds(response: httpx.Response) -> int | None:
     return None
 
 
-async def analyze_comment(
-    *, comment_body: str, perception_body: str, topic_name: str | None
-) -> dict[str, Any]:
+async def analyze_comment(*, comment_body: str, perception_body: str, topic_name: str | None) -> dict[str, Any]:
     settings = get_settings()
     if not settings.OPENAI_API_KEY:
         raise CommentIntelligenceProviderError("provider_not_configured")
-    if not settings.COMMENT_INTELLIGENCE_EXTERNAL_PROCESSING_ALLOWED:
-        raise CommentIntelligenceProviderError("external_processing_not_allowed")
 
     payload = {
         "model": settings.COMMENT_INTELLIGENCE_MODEL,
         "store": False,
-        "input": build_analysis_input(
-            comment_body=comment_body,
-            perception_body=perception_body,
-            topic_name=topic_name,
-        ),
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "comment_intelligence",
-                "strict": True,
-                "schema": ANALYSIS_SCHEMA,
-            }
-        },
+        "input": [
+            {"role": "developer", "content": [{"type": "input_text", "text": SYSTEM_PROMPT}]},
+            {"role": "user", "content": [{"type": "input_text", "text": (
+                f"Perception topic: {(topic_name or 'unspecified').strip()[:200]}\n\n"
+                f"Perception: {perception_body.strip()[:6000]}\n\n"
+                f"Comment: {comment_body.strip()[:6000]}"
+            )}]},
+        ],
+        "text": {"format": {
+            "type": "json_schema",
+            "name": "comment_intelligence",
+            "strict": True,
+            "schema": ANALYSIS_SCHEMA,
+        }},
     }
 
     try:
@@ -240,9 +184,7 @@ async def analyze_comment(
         logger.warning("Comment intelligence provider timed out")
         raise CommentIntelligenceProviderError("provider_timeout") from exc
     except (httpx.HTTPError, ValueError) as exc:
-        logger.warning(
-            "Comment intelligence provider request failed: %s", exc.__class__.__name__
-        )
+        logger.warning("Comment intelligence provider request failed: %s", exc.__class__.__name__)
         raise CommentIntelligenceProviderError("provider_request_error") from exc
 
     if data.get("status") in {"failed", "cancelled", "incomplete"}:

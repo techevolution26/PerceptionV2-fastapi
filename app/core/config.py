@@ -51,7 +51,6 @@ class Settings(BaseSettings):
 
     # --- Comment intelligence ---
     COMMENT_INTELLIGENCE_ENABLED: bool = False
-    COMMENT_INTELLIGENCE_EXTERNAL_PROCESSING_ALLOWED: bool = False
     COMMENT_INTELLIGENCE_MODEL: str = "gpt-5.6-luna"
     COMMENT_INTELLIGENCE_BATCH_SIZE: int = 10
     COMMENT_INTELLIGENCE_INTERVAL_SECONDS: int = 60
@@ -77,13 +76,6 @@ class Settings(BaseSettings):
                 raise ValueError("PASSWORD_RESET_URL must use https:// or perception:// in production")
             if self.COMMENT_INTELLIGENCE_ENABLED and not self.OPENAI_API_KEY:
                 raise ValueError("OPENAI_API_KEY is required when comment intelligence is enabled in production")
-            if self.COMMENT_INTELLIGENCE_ENABLED and not self.COMMENT_INTELLIGENCE_EXTERNAL_PROCESSING_ALLOWED:
-                raise ValueError("External comment-intelligence processing must be explicitly enabled in production")
-            if self.OPENAI_BASE_URL and not self.OPENAI_BASE_URL.startswith("https://"):
-                raise ValueError("OPENAI_BASE_URL must use HTTPS in production")
-            for url_name, url_value in (("PUBLIC_APP_URL", self.PUBLIC_APP_URL), ("STRIPE_SUCCESS_URL", self.STRIPE_SUCCESS_URL), ("STRIPE_CANCEL_URL", self.STRIPE_CANCEL_URL)):
-                if not url_value.startswith("https://"):
-                    raise ValueError(f"{url_name} must use HTTPS in production")
         return self
 
     # --- Database ---
