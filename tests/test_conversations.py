@@ -23,7 +23,7 @@ pytestmark = pytest.mark.asyncio
 async def _register(client, name, email):
     res = await client.post(
         "/api/register",
-        json={"name": name, "email": email, "password": "supersecret1", "password_confirmation": "supersecret1"},
+        json={"name": name, "email": email, "password": "Supersecret1!", "password_confirmation": "Supersecret1!"},
     )
     body = res.json()
     return body["token"], body["user"]["id"]
@@ -31,7 +31,13 @@ async def _register(client, name, email):
 
 async def test_send_and_fetch_message(client):
     token_a, id_a = await _register(client, "Ada", "ada@example.com")
-    _, id_b = await _register(client, "Bob", "bob@example.com")
+    token_b, id_b = await _register(client, "Bob", "bob@example.com")
+    for token, peer_id in ((token_a, id_b), (token_b, id_a)):
+        follow = await client.post(
+            f"/api/users/{peer_id}/follow",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert follow.status_code == 200
     headers = {"Authorization": f"Bearer {token_a}"}
 
     res = await client.post(f"/api/conversations/{id_b}", json={"body": "hi bob"}, headers=headers)

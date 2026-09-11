@@ -106,8 +106,15 @@ def aggregate_professional_geographic_semantics(
         if participant_minimum is None:
             return True
         return (
-            len({user.id for _intelligence, user in segment_rows})
+            len({getattr(user, "id", id(user)) for _intelligence, user in segment_rows})
             >= participant_minimum
+        )
+
+    def participant_count(
+        segment_rows: list[tuple[CommentIntelligence, User]],
+    ) -> int:
+        return len(
+            {getattr(user, "id", id(user)) for _intelligence, user in segment_rows}
         )
 
     professional_segments = []
@@ -115,9 +122,7 @@ def aggregate_professional_geographic_semantics(
         if qualifies(segment_rows):
             comment_rows = [intelligence for intelligence, _user in segment_rows]
             item = _segment(comment_rows, key="role_code", label=role)
-            item["participant_count"] = len(
-                {user.id for _intelligence, user in segment_rows}
-            )
+            item["participant_count"] = participant_count(segment_rows)
             item["role_label"] = ROLE_MAP.get(role, {}).get("label", role)
             professional_segments.append(item)
 
@@ -129,9 +134,7 @@ def aggregate_professional_geographic_semantics(
                 key="geography",
                 label=geo,
             )
-            item["participant_count"] = len(
-                {user.id for _intelligence, user in segment_rows}
-            )
+            item["participant_count"] = participant_count(segment_rows)
             geographic_segments.append(item)
 
     cross_segments = []
@@ -139,9 +142,7 @@ def aggregate_professional_geographic_semantics(
         if qualifies(segment_rows):
             comment_rows = [intelligence for intelligence, _user in segment_rows]
             item = _segment(comment_rows, key="role_code", label=role)
-            item["participant_count"] = len(
-                {user.id for _intelligence, user in segment_rows}
-            )
+            item["participant_count"] = participant_count(segment_rows)
             item["role_label"] = ROLE_MAP.get(role, {}).get("label", role)
             item["geography"] = geo
             cross_segments.append(item)

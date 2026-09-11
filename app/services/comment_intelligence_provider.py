@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 from typing import Any
 
 import httpx
@@ -158,6 +159,37 @@ def _extract_output_text(payload: dict[str, Any]) -> str:
             if isinstance(text, str):
                 chunks.append(text)
     return "".join(chunks).strip()
+
+
+def _parse_duration(value: str) -> int | None:
+    value = value.strip()
+    if value.isdigit():
+        return int(value)
+
+    total = 0.0
+    matched = False
+    for amount, unit in re.findall(r"(\d+(?:\.\d+)?)([hms])", value.lower()):
+        matched = True
+        multiplier = {"h": 3600, "m": 60, "s": 1}[unit]
+        total += float(amount) * multiplier
+    return int(total) if matched and total >= 0 else None
+
+
+def _cooldown_seconds(response: httpx.Response, *, maximum: int) -> int | None:
+    retry_after = response.headers.get("retry-after")
+    reset = response.headers.get("x-ratelimit-reset-requests")
+    remaining_requests = response.headers.get("x-ratelimit-remaining-requests")
+
+    if remaining_requests == "0" and reset:
+        value = _parse_duration(reset)
+        if value is not None:
+            return min(value, maximum)
+
+    if retry_after:
+        value = _parse_duration(retry_after)
+        if value is not None:
+            return min(value, maximum)
+    return None
 
 
 def _retry_after_seconds(response: httpx.Response) -> int | None:

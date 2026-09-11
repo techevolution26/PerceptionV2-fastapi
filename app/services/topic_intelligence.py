@@ -208,7 +208,7 @@ def build_topic_intelligence(
                     ],
                 }
             )
-    if qualifying_count >= perception_minimum:
+    if semantic_status == "available" and qualifying_count >= perception_minimum:
         patterns.append(
             {
                 "label": "Multi-Perception Topic evidence",

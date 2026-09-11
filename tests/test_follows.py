@@ -7,7 +7,7 @@ pytestmark = pytest.mark.asyncio
 async def _register(client, name, email):
     res = await client.post(
         "/api/register",
-        json={"name": name, "email": email, "password": "supersecret1", "password_confirmation": "supersecret1"},
+        json={"name": name, "email": email, "password": "Supersecret1!", "password_confirmation": "Supersecret1!"},
     )
     body = res.json()
     return body["token"], body["user"]["id"]

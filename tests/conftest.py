@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
+from app.api.routes import auth as auth_routes
 
 # SQLite in-memory covers the vast majority of routes fast, without needing
 # a real Postgres instance for every test run. The one Postgres-specific
@@ -27,9 +28,12 @@ async def db_session():
         async with session_factory() as session:
             yield session
 
+    previous_fail_open = auth_routes.settings.RATE_LIMIT_FAIL_OPEN
+    auth_routes.settings.RATE_LIMIT_FAIL_OPEN = True
     app.dependency_overrides[get_db] = override_get_db
     yield session_factory
     app.dependency_overrides.clear()
+    auth_routes.settings.RATE_LIMIT_FAIL_OPEN = previous_fail_open
     await engine.dispose()
 
 
