@@ -1,4 +1,5 @@
 """Privacy-safe professional and geographic semantic cross-analysis."""
+
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -54,6 +55,7 @@ def aggregate_professional_geographic_semantics(
     rows: list[tuple[CommentIntelligence, User]],
     *,
     minimum: int = CROSS_ANALYSIS_MINIMUM,
+    participant_minimum: int | None = None,
 ) -> dict:
     """Aggregate analyzed comments by professional and geographic cohorts.
 
@@ -75,9 +77,15 @@ def aggregate_professional_geographic_semantics(
             "professional_geographic_segments": [],
         }
 
-    professional: defaultdict[str, list[CommentIntelligence]] = defaultdict(list)
-    geographic: defaultdict[str, list[CommentIntelligence]] = defaultdict(list)
-    cross: defaultdict[tuple[str, str], list[CommentIntelligence]] = defaultdict(list)
+    professional: defaultdict[str, list[tuple[CommentIntelligence, User]]] = (
+        defaultdict(list)
+    )
+    geographic: defaultdict[str, list[tuple[CommentIntelligence, User]]] = defaultdict(
+        list
+    )
+    cross: defaultdict[tuple[str, str], list[tuple[CommentIntelligence, User]]] = (
+        defaultdict(list)
+    )
 
     for intelligence, user in rows:
         role = user.primary_professional_role
@@ -88,28 +96,52 @@ def aggregate_professional_geographic_semantics(
         geo = f"{country} · {region}" if region != "UNKNOWN" else country
 
         if role:
-            professional[str(role)].append(intelligence)
-            cross[(str(role), geo)].append(intelligence)
-        geographic[geo].append(intelligence)
+            professional[str(role)].append((intelligence, user))
+            cross[(str(role), geo)].append((intelligence, user))
+        geographic[geo].append((intelligence, user))
+
+    def qualifies(segment_rows: list[tuple[CommentIntelligence, User]]) -> bool:
+        if len(segment_rows) < minimum:
+            return False
+        if participant_minimum is None:
+            return True
+        return (
+            len({user.id for _intelligence, user in segment_rows})
+            >= participant_minimum
+        )
 
     professional_segments = []
     for role, segment_rows in professional.items():
-        if len(segment_rows) >= minimum:
-            item = _segment(segment_rows, key="role_code", label=role)
+        if qualifies(segment_rows):
+            comment_rows = [intelligence for intelligence, _user in segment_rows]
+            item = _segment(comment_rows, key="role_code", label=role)
+            item["participant_count"] = len(
+                {user.id for _intelligence, user in segment_rows}
+            )
             item["role_label"] = ROLE_MAP.get(role, {}).get("label", role)
             professional_segments.append(item)
 
     geographic_segments = []
     for geo, segment_rows in geographic.items():
-        if len(segment_rows) >= minimum:
-            geographic_segments.append(
-                _segment(segment_rows, key="geography", label=geo)
+        if qualifies(segment_rows):
+            item = _segment(
+                [intelligence for intelligence, _user in segment_rows],
+                key="geography",
+                label=geo,
             )
+            item["participant_count"] = len(
+                {user.id for _intelligence, user in segment_rows}
+            )
+            geographic_segments.append(item)
 
     cross_segments = []
     for (role, geo), segment_rows in cross.items():
-        if len(segment_rows) >= minimum:
-            item = _segment(segment_rows, key="role_code", label=role)
+        if qualifies(segment_rows):
+            comment_rows = [intelligence for intelligence, _user in segment_rows]
+            item = _segment(comment_rows, key="role_code", label=role)
+            item["participant_count"] = len(
+                {user.id for _intelligence, user in segment_rows}
+            )
             item["role_label"] = ROLE_MAP.get(role, {}).get("label", role)
             item["geography"] = geo
             cross_segments.append(item)
@@ -119,12 +151,17 @@ def aggregate_professional_geographic_semantics(
     cross_segments.sort(key=lambda item: item["sample_size"], reverse=True)
 
     return {
-        "cross_analysis_status": "available" if (professional_segments or geographic_segments) else "insufficient_segments",
+        "cross_analysis_status": (
+            "available"
+            if (professional_segments or geographic_segments)
+            else "insufficient_segments"
+        ),
         "cross_analysis_note": (
             "Semantic signals are compared only across cohorts that meet the minimum sample. "
             "Professional cohorts use primary professional identity; geography uses country and region."
         ),
         "cross_analysis_sample_minimum": minimum,
+        "cross_analysis_participant_minimum": participant_minimum,
         "cross_analysis_comment_count": len(rows),
         "professional_semantic_segments": professional_segments[:10],
         "geographic_semantic_segments": geographic_segments[:10],

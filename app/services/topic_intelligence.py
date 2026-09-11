@@ -4,6 +4,7 @@ This layer consumes stored comment-semantic evidence. It never calls an AI
 provider, never exposes participant identities, and never treats a single
 Perception as equivalent to a Topic-wide finding.
 """
+
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -12,21 +13,28 @@ from typing import Any
 
 from app.models.models import CommentIntelligence, User
 from app.services.comment_intelligence import aggregate_comment_intelligence
-from app.services.comment_cross_analysis import aggregate_professional_geographic_semantics
+from app.services.comment_cross_analysis import (
+    aggregate_professional_geographic_semantics,
+)
 
 TOPIC_INTELLIGENCE_SCHEMA_VERSION = "1.0"
 TOPIC_SAMPLE_MINIMUM = 5
 TOPIC_PERCEPTION_MINIMUM = 2
+TOPIC_PARTICIPANT_MINIMUM = 5
 TOPIC_BUCKET_DAYS = 30
 
 
 def _dist(values: list[str | None]) -> list[dict[str, Any]]:
     counts = Counter(value for value in values if value)
     total = sum(counts.values())
-    return [
-        {"label": label, "comments": count, "share": round(count / total, 3)}
-        for label, count in counts.most_common()
-    ] if total else []
+    return (
+        [
+            {"label": label, "comments": count, "share": round(count / total, 3)}
+            for label, count in counts.most_common()
+        ]
+        if total
+        else []
+    )
 
 
 def _themes(rows: list[CommentIntelligence], limit: int = 5) -> list[dict[str, Any]]:
@@ -37,10 +45,14 @@ def _themes(rows: list[CommentIntelligence], limit: int = 5) -> list[dict[str, A
             if label:
                 counts[label] += 1
     total = sum(counts.values())
-    return [
-        {"theme": label, "comments": count, "share": round(count / total, 3)}
-        for label, count in counts.most_common(limit)
-    ] if total else []
+    return (
+        [
+            {"theme": label, "comments": count, "share": round(count / total, 3)}
+            for label, count in counts.most_common(limit)
+        ]
+        if total
+        else []
+    )
 
 
 def _quality(rows: list[CommentIntelligence]) -> float | None:
@@ -66,6 +78,7 @@ def build_topic_intelligence(
     decision_intent: str = "general_exploration",
     minimum: int = TOPIC_SAMPLE_MINIMUM,
     perception_minimum: int = TOPIC_PERCEPTION_MINIMUM,
+    participant_minimum: int = TOPIC_PARTICIPANT_MINIMUM,
 ) -> dict[str, Any]:
     rows = semantic_rows
     by_perception: dict[int, list[CommentIntelligence]] = defaultdict(list)
@@ -79,12 +92,15 @@ def build_topic_intelligence(
     }
     analyzed_count = len(rows)
     qualifying_count = len(qualifying)
+    unique_participants = len({user.id for _intelligence, user in participant_rows})
 
     semantic_status = "available"
     if analyzed_count < minimum:
         semantic_status = "insufficient_sample"
     elif qualifying_count < perception_minimum:
         semantic_status = "insufficient_breadth"
+    elif unique_participants < participant_minimum:
+        semantic_status = "insufficient_participants"
 
     semantic = aggregate_comment_intelligence(
         [row for row, _pid, _created_at in rows],
@@ -92,49 +108,73 @@ def build_topic_intelligence(
         minimum=minimum,
     )
     if semantic_status != "available":
-        semantic.update({
-            "semantic_analysis_status": semantic_status,
-            "semantic_analysis_note": (
-                f"Topic intelligence requires at least {minimum} analyzed comments and "
-                f"{perception_minimum} qualifying Perceptions under the Topic."
-            ),
-        })
+        semantic.update(
+            {
+                "semantic_analysis_status": semantic_status,
+                "semantic_analysis_note": (
+                    f"Topic intelligence requires at least {minimum} analyzed comments, "
+                    f"{perception_minimum} qualifying Perceptions, and {participant_minimum} unique participants under the Topic."
+                ),
+            }
+        )
 
     perception_segments = [
-        {"perception_id": perception_id, "sample_size": len(values), "topic_name": topic_name}
-        for perception_id, values in sorted(qualifying.items(), key=lambda item: len(item[1]), reverse=True)
+        {
+            "perception_id": perception_id,
+            "sample_size": len(values),
+            "topic_name": topic_name,
+        }
+        for perception_id, values in sorted(
+            qualifying.items(), key=lambda item: len(item[1]), reverse=True
+        )
     ]
 
-    perspectives = aggregate_professional_geographic_semantics(
-        participant_rows,
-        minimum=minimum,
-    ) if semantic_status == "available" else {
-        "cross_analysis_status": "insufficient_sample",
-        "cross_analysis_sample_minimum": minimum,
-        "cross_analysis_comment_count": analyzed_count,
-        "cross_analysis_note": "Professional and geographic topic perspectives are withheld until the Topic evidence threshold is met.",
-        "professional_semantic_segments": [],
-        "geographic_semantic_segments": [],
-        "professional_geographic_segments": [],
-    }
+    perspectives = (
+        aggregate_professional_geographic_semantics(
+            participant_rows,
+            minimum=minimum,
+            participant_minimum=participant_minimum,
+        )
+        if semantic_status == "available"
+        else {
+            "cross_analysis_status": "insufficient_sample",
+            "cross_analysis_sample_minimum": minimum,
+            "cross_analysis_participant_minimum": participant_minimum,
+            "cross_analysis_comment_count": analyzed_count,
+            "cross_analysis_note": "Professional and geographic topic perspectives are withheld until the Topic evidence and participant privacy thresholds are met.",
+            "professional_semantic_segments": [],
+            "geographic_semantic_segments": [],
+            "professional_geographic_segments": [],
+        }
+    )
 
     buckets: list[dict[str, Any]] = []
     cursor = period_start
     while cursor < period_end:
         end = min(cursor + timedelta(days=TOPIC_BUCKET_DAYS), period_end)
-        bucket_rows = [row for row, _pid, created_at in rows if cursor <= created_at < end]
+        bucket_rows = [
+            row for row, _pid, created_at in rows if cursor <= created_at < end
+        ]
         available = len(bucket_rows) >= minimum
-        buckets.append({
-            "period_start": cursor,
-            "period_end": end,
-            "sample_size": len(bucket_rows),
-            "status": "available" if available else "insufficient_sample",
-            "sentiment_distribution": _dist([r.sentiment for r in bucket_rows]) if available else [],
-            "stance_distribution": _dist([r.stance for r in bucket_rows]) if available else [],
-            "top_themes": _themes(bucket_rows) if available else [],
-            "question_count": sum(1 for r in bucket_rows if r.is_question) if available else 0,
-            "quality_score": _quality(bucket_rows) if available else None,
-        })
+        buckets.append(
+            {
+                "period_start": cursor,
+                "period_end": end,
+                "sample_size": len(bucket_rows),
+                "status": "available" if available else "insufficient_sample",
+                "sentiment_distribution": (
+                    _dist([r.sentiment for r in bucket_rows]) if available else []
+                ),
+                "stance_distribution": (
+                    _dist([r.stance for r in bucket_rows]) if available else []
+                ),
+                "top_themes": _themes(bucket_rows) if available else [],
+                "question_count": (
+                    sum(1 for r in bucket_rows if r.is_question) if available else 0
+                ),
+                "quality_score": _quality(bucket_rows) if available else None,
+            }
+        )
         cursor = end
 
     qualifying_buckets = [b for b in buckets if b["status"] == "available"]
@@ -144,43 +184,67 @@ def build_topic_intelligence(
         distributions = semantic["sentiment_distribution"]
         if distributions:
             dominant = distributions[0]
-            patterns.append({
-                "label": "Dominant observed sentiment",
-                "description": f"{dominant['label']} is the leading observed sentiment across qualifying responses under this Topic.",
-                "sample_size": dominant["comments"],
-                "evidence_type": "topic_semantic_distribution",
-                "limitations": ["Observed sentiment describes analyzed responses and is not a population estimate."],
-            })
+            patterns.append(
+                {
+                    "label": "Dominant observed sentiment",
+                    "description": f"{dominant['label']} is the leading observed sentiment across qualifying responses under this Topic.",
+                    "sample_size": dominant["comments"],
+                    "evidence_type": "topic_semantic_distribution",
+                    "limitations": [
+                        "Observed sentiment describes analyzed responses and is not a population estimate."
+                    ],
+                }
+            )
         if semantic["top_themes"]:
             theme = semantic["top_themes"][0]
-            patterns.append({
-                "label": "Recurring Topic theme",
-                "description": f"'{theme['theme']}' is the most frequent analyzed theme across the Topic's qualifying responses.",
-                "sample_size": theme["comments"],
-                "evidence_type": "topic_theme_distribution",
-                "limitations": ["Theme frequency does not establish causation, importance, or representativeness."],
-            })
+            patterns.append(
+                {
+                    "label": "Recurring Topic theme",
+                    "description": f"'{theme['theme']}' is the most frequent analyzed theme across the Topic's qualifying responses.",
+                    "sample_size": theme["comments"],
+                    "evidence_type": "topic_theme_distribution",
+                    "limitations": [
+                        "Theme frequency does not establish causation, importance, or representativeness."
+                    ],
+                }
+            )
     if qualifying_count >= perception_minimum:
-        patterns.append({
-            "label": "Multi-Perception Topic evidence",
-            "description": f"The Topic contains {qualifying_count} Perceptions that independently meet the {minimum}-comment analytical threshold.",
-            "sample_size": sum(len(values) for values in qualifying.values()),
-            "evidence_type": "topic_perception_breadth",
-            "limitations": ["Qualifying Perceptions are not necessarily representative of all activity under the Topic."],
-        })
+        patterns.append(
+            {
+                "label": "Multi-Perception Topic evidence",
+                "description": f"The Topic contains {qualifying_count} Perceptions that independently meet the {minimum}-comment analytical threshold.",
+                "sample_size": sum(len(values) for values in qualifying.values()),
+                "evidence_type": "topic_perception_breadth",
+                "limitations": [
+                    "Qualifying Perceptions are not necessarily representative of all activity under the Topic."
+                ],
+            }
+        )
     if len(qualifying_buckets) >= 2:
         first = qualifying_buckets[0]
         last = qualifying_buckets[-1]
-        first_stance = first["stance_distribution"][0]["label"] if first["stance_distribution"] else None
-        last_stance = last["stance_distribution"][0]["label"] if last["stance_distribution"] else None
+        first_stance = (
+            first["stance_distribution"][0]["label"]
+            if first["stance_distribution"]
+            else None
+        )
+        last_stance = (
+            last["stance_distribution"][0]["label"]
+            if last["stance_distribution"]
+            else None
+        )
         if first_stance and last_stance and first_stance != last_stance:
-            patterns.append({
-                "label": "Observed Topic stance change",
-                "description": "The leading observed stance differs between qualifying Topic time windows.",
-                "sample_size": min(first["sample_size"], last["sample_size"]),
-                "evidence_type": "topic_temporal_comparison",
-                "limitations": ["Temporal change does not establish causation or a durable change in wider public opinion."],
-            })
+            patterns.append(
+                {
+                    "label": "Observed Topic stance change",
+                    "description": "The leading observed stance differs between qualifying Topic time windows.",
+                    "sample_size": min(first["sample_size"], last["sample_size"]),
+                    "evidence_type": "topic_temporal_comparison",
+                    "limitations": [
+                        "Temporal change does not establish causation or a durable change in wider public opinion."
+                    ],
+                }
+            )
 
     # Free intelligence is intentionally bounded; full topic perspectives and
     # temporal evidence remain available only to entitled viewers.
@@ -197,19 +261,26 @@ def build_topic_intelligence(
         }
         buckets = []
 
-    quality = _quality([row for row, _pid, _created_at in rows]) if semantic_status == "available" else None
-    unique_participants = len({user.id for _intelligence, user in participant_rows})
+    quality = (
+        _quality([row for row, _pid, _created_at in rows])
+        if semantic_status == "available"
+        else None
+    )
     limitations = [
         "Topic Intelligence aggregates analyzed responses across multiple Perceptions under one Topic.",
         "A Topic-level observation does not imply that every Perception under the Topic has the same response pattern.",
         "Pending and failed semantic analyses are excluded from evidence-backed intelligence.",
-        "A minimum sample of five analyzed comments is required; Topic breadth also requires two qualifying Perceptions.",
+        "A minimum sample of five analyzed comments is required; Topic breadth also requires two qualifying Perceptions and at least five unique participants before Topic-wide semantic conclusions qualify.",
         "Individual participant identities and city-level aggregate intelligence are not exposed.",
         "Observational patterns do not establish causation, prediction, or population representativeness.",
     ]
     provenance = {
         "trace_id": _trace_id(topic_id, period_start, period_end),
-        "evidence_chain": ["human_responses", "comment_intelligence", "topic_aggregation"],
+        "evidence_chain": [
+            "human_responses",
+            "comment_intelligence",
+            "topic_aggregation",
+        ],
         "source": "topic_intelligence",
         "evidence_types": ["comment_intelligence", "topic_perception_breadth"],
         "sample_size": analyzed_count,
@@ -251,10 +322,36 @@ def build_topic_intelligence(
             "upgrade_message": upgrade_message,
         },
         "measurements": {
-            "perceptions": {"value": len(by_perception), "available": True, "description": "Active Perceptions with analyzed response evidence under this Topic in the selected period."},
-            "qualifying_perceptions": {"value": qualifying_count, "available": True, "description": f"Perceptions with at least {minimum} analyzed comments."},
-            "analyzed_comments": {"value": analyzed_count, "available": True, "description": "Analyzed comments eligible for Topic aggregation."},
-            "unique_participants": {"value": unique_participants, "available": semantic_status == "available", "description": "Unique active commenters represented in analyzed Topic evidence; identities are never exposed."},
+            "perceptions": {
+                "value": len(by_perception),
+                "available": True,
+                "description": "Active Perceptions with analyzed response evidence under this Topic in the selected period.",
+            },
+            "qualifying_perceptions": {
+                "value": qualifying_count,
+                "available": True,
+                "description": f"Perceptions with at least {minimum} analyzed comments.",
+            },
+            "analyzed_comments": {
+                "value": analyzed_count,
+                "available": True,
+                "description": "Analyzed comments eligible for Topic aggregation.",
+            },
+            "unique_participants": {
+                "value": (
+                    unique_participants
+                    if unique_participants >= participant_minimum
+                    else None
+                ),
+                "available": unique_participants >= participant_minimum
+                and semantic_status == "available",
+                "description": (
+                    "Unique active commenters represented in analyzed Topic evidence; identities are never exposed."
+                    if unique_participants >= participant_minimum
+                    and semantic_status == "available"
+                    else f"Suppressed until at least {participant_minimum} unique participants qualify."
+                ),
+            },
         },
         "perceptions": perception_segments,
         "semantic": {
@@ -262,20 +359,47 @@ def build_topic_intelligence(
             "note": semantic["semantic_analysis_note"],
             "sample_minimum": minimum,
             "perception_minimum": perception_minimum,
+            "participant_minimum": participant_minimum,
             "analyzed_comment_count": analyzed_count,
             "qualifying_perception_count": qualifying_count,
             "quality_score": quality,
-            "sentiment_distribution": semantic["sentiment_distribution"] if semantic_status == "available" else [],
-            "stance_distribution": semantic["stance_distribution"] if semantic_status == "available" else [],
-            "top_themes": semantic["top_themes"] if semantic_status == "available" else [],
-            "question_count": semantic["question_count"] if semantic_status == "available" else 0,
-            "concern_themes": semantic["concern_themes"] if semantic_status == "available" else [],
-            "agreement_themes": semantic["agreement_themes"] if semantic_status == "available" else [],
-            "disagreement_themes": semantic["disagreement_themes"] if semantic_status == "available" else [],
+            "sentiment_distribution": (
+                semantic["sentiment_distribution"]
+                if semantic_status == "available"
+                else []
+            ),
+            "stance_distribution": (
+                semantic["stance_distribution"]
+                if semantic_status == "available"
+                else []
+            ),
+            "top_themes": (
+                semantic["top_themes"] if semantic_status == "available" else []
+            ),
+            "question_count": (
+                semantic["question_count"] if semantic_status == "available" else 0
+            ),
+            "concern_themes": (
+                semantic["concern_themes"] if semantic_status == "available" else []
+            ),
+            "agreement_themes": (
+                semantic["agreement_themes"] if semantic_status == "available" else []
+            ),
+            "disagreement_themes": (
+                semantic["disagreement_themes"]
+                if semantic_status == "available"
+                else []
+            ),
         },
         "perspectives": {
-            "status": "available" if perspectives["professional_semantic_segments"] or perspectives["geographic_semantic_segments"] else "insufficient_segments",
+            "status": (
+                "available"
+                if perspectives["professional_semantic_segments"]
+                or perspectives["geographic_semantic_segments"]
+                else "insufficient_segments"
+            ),
             "sample_minimum": minimum,
+            "participant_minimum": participant_minimum,
             "analyzed_comment_count": analyzed_count,
             "professional": perspectives["professional_semantic_segments"],
             "geographic": perspectives["geographic_semantic_segments"],

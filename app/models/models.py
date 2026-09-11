@@ -57,10 +57,16 @@ class User(TimestampMixin, Base):
     analytics_specialties: Mapped[list] = mapped_column(
         JSON, default=list, nullable=False
     )
-    professional_industries: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    professional_industries: Mapped[list] = mapped_column(
+        JSON, default=list, nullable=False
+    )
     professional_roles: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    primary_professional_role: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
-    verified_professional_roles: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    primary_professional_role: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    verified_professional_roles: Mapped[list] = mapped_column(
+        JSON, default=list, nullable=False
+    )
     primary_analytics_topic_id: Mapped[int | None] = mapped_column(
         ForeignKey("topics.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -89,13 +95,19 @@ class User(TimestampMixin, Base):
         if not self.primary_professional_role:
             return None
         from app.services.professional_taxonomy import ROLE_MAP
+
         role = ROLE_MAP.get(self.primary_professional_role)
         return role["label"] if role else self.profession
 
     @property
     def professional_role_labels(self) -> list[str]:
         from app.services.professional_taxonomy import ROLE_MAP
-        return [ROLE_MAP[code]["label"] for code in (self.professional_roles or []) if code in ROLE_MAP]
+
+        return [
+            ROLE_MAP[code]["label"]
+            for code in (self.professional_roles or [])
+            if code in ROLE_MAP
+        ]
 
     perceptions: Mapped[list["Perception"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
@@ -118,9 +130,13 @@ class PasswordResetToken(Base):
     )
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     requested_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Topic(TimestampMixin, Base):
@@ -229,11 +245,17 @@ class CommentIntelligence(TimestampMixin, Base):
     themes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     is_question: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     has_concern: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    agreement_signal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    disagreement_signal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    agreement_signal: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    disagreement_signal: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     quality_score: Mapped[float | None] = mapped_column(nullable=True)
     model_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    analyzed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
@@ -483,8 +505,12 @@ class VerificationApplication(Base):
     profession: Mapped[str] = mapped_column(String(255))
     focus: Mapped[str] = mapped_column(String(255))
     industry_codes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    professional_role_codes: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    primary_professional_role: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    professional_role_codes: Mapped[list] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    primary_professional_role: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
     primary_topic_id: Mapped[int | None] = mapped_column(
         ForeignKey("topics.id", ondelete="SET NULL"), nullable=True
     )

@@ -39,10 +39,16 @@ class TopicPerceptionSegment(BaseModel):
 
 
 class TopicSemantic(BaseModel):
-    status: Literal["insufficient_sample", "insufficient_breadth", "available"]
+    status: Literal[
+        "insufficient_sample",
+        "insufficient_breadth",
+        "insufficient_participants",
+        "available",
+    ]
     note: str
     sample_minimum: int
     perception_minimum: int
+    participant_minimum: int
     analyzed_comment_count: int
     qualifying_perception_count: int
     quality_score: float | None
@@ -68,6 +74,7 @@ class TopicPerspective(BaseModel):
 class TopicPerspectives(BaseModel):
     status: Literal["available", "insufficient_sample", "insufficient_segments"]
     sample_minimum: int
+    participant_minimum: int
     analyzed_comment_count: int
     professional: list[dict] = Field(default_factory=list)
     geographic: list[dict] = Field(default_factory=list)

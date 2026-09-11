@@ -29,20 +29,39 @@ from app.schemas.business import (
     AnalyticsTopicOut,
     AnalyticsTrendPoint,
 )
-from app.services.subscriptions import get_current_subscription, require_analytics_access
-from app.services.comment_cross_analysis import aggregate_professional_geographic_semantics
-from app.services.perception_intelligence import MINIMUM_SAMPLE, orchestrate_perception_intelligence
+from app.services.subscriptions import (
+    get_current_subscription,
+    require_analytics_access,
+)
+from app.services.comment_cross_analysis import (
+    aggregate_professional_geographic_semantics,
+)
+from app.services.perception_intelligence import (
+    MINIMUM_SAMPLE,
+    orchestrate_perception_intelligence,
+)
 from app.services.decision_intelligence import build_decision_intelligence
 from app.schemas.perception_intelligence import PerceptionIntelligence
 from app.services.temporal_intelligence import build_temporal_intelligence
-from app.services.profile_intelligence import PROFILE_WINDOW_DAYS, build_profile_intelligence
+from app.services.profile_intelligence import (
+    PROFILE_WINDOW_DAYS,
+    build_profile_intelligence,
+)
 from app.services.intelligence_freshness import assess_intelligence_freshness
 from app.services.intelligence_quality import assess_intelligence_quality
 from app.services.evidence_governance import assess_evidence_governance
 from app.services.semantic_model_governance import assess_semantic_model_governance
 from app.schemas.profile_intelligence import ProfileIntelligence
 from app.schemas.comparative_intelligence import ComparativeIntelligence
-from app.services.comparative_intelligence import COMPARISON_LIMIT, build_comparative_intelligence
+from app.services.comparative_intelligence import (
+    COMPARISON_LIMIT,
+    build_comparative_intelligence,
+)
+from app.schemas.topic_intelligence import TopicIntelligence
+from app.services.topic_intelligence import (
+    build_topic_intelligence,
+    TOPIC_SAMPLE_MINIMUM,
+)
 from app.services.comment_intelligence import (
     get_comment_intelligence_participant_rows,
     get_comment_intelligence_rows,
@@ -172,7 +191,10 @@ async def analytics_overview(current_user: CurrentUser, db: DbSession, days: int
     previous_since = since - timedelta(days=days)
 
     topic_scope = await _topic_scope(db, current_user.id, sub.plan.max_topics)
-    current_filters = [Perception.user_id == current_user.id, Perception.created_at >= since]
+    current_filters = [
+        Perception.user_id == current_user.id,
+        Perception.created_at >= since,
+    ]
     previous_filters = [
         Perception.user_id == current_user.id,
         Perception.created_at >= previous_since,
@@ -610,7 +632,11 @@ async def analytics_intelligence(
     since = datetime.now(timezone.utc) - timedelta(days=days)
     topic_scope = await _topic_scope(db, current_user.id, sub.plan.max_topics)
 
-    filters = [Perception.user_id == current_user.id, Perception.created_at >= since, Perception.topic_id.is_not(None)]
+    filters = [
+        Perception.user_id == current_user.id,
+        Perception.created_at >= since,
+        Perception.topic_id.is_not(None),
+    ]
     if topic_scope:
         filters.append(Perception.topic_id.in_(topic_scope))
 
@@ -815,8 +841,14 @@ async def perception_analytics(
     db: DbSession,
     days: int = 30,
     decision_intent: Literal[
-        "research", "business", "policy", "journalism", "education",
-        "product", "professional", "general_exploration"
+        "research",
+        "business",
+        "policy",
+        "journalism",
+        "education",
+        "product",
+        "professional",
+        "general_exploration",
     ] = "general_exploration",
 ):
     days = max(7, min(days, 365))
@@ -831,7 +863,11 @@ async def perception_analytics(
 
     is_author = p.user_id == current_user.id
     current_subscription = await get_current_subscription(db, current_user.id)
-    has_analytics_plan = bool(current_subscription and current_subscription.plan and current_subscription.plan.analytics_enabled)
+    has_analytics_plan = bool(
+        current_subscription
+        and current_subscription.plan
+        and current_subscription.plan.analytics_enabled
+    )
 
     now = datetime.now(timezone.utc)
     period_end = now
@@ -890,7 +926,6 @@ async def perception_analytics(
         .all()
     )
 
-
     activity = (
         await db.execute(
             select(
@@ -908,8 +943,12 @@ async def perception_analytics(
     # All audience breakdowns are commenter-derived. Semantic cohorts below
     # are stricter still: they require analyzed comments.
     participants = (
-        await db.execute(select(User).where(User.id.in_(comment_participant_ids)))
-    ).scalars().all() if comment_participant_ids else []
+        (await db.execute(select(User).where(User.id.in_(comment_participant_ids))))
+        .scalars()
+        .all()
+        if comment_participant_ids
+        else []
+    )
 
     audience_minimum = MINIMUM_SAMPLE
     country_counts: dict[str, int] = {}
@@ -943,13 +982,29 @@ async def perception_analytics(
     freshness = await assess_intelligence_freshness(db, p.id, since)
     quality = await assess_intelligence_quality(db, p.id, since, minimum=MINIMUM_SAMPLE)
     semantic_rows = await get_comment_intelligence_rows(db, p.id, since)
-    semantic_model_governance = assess_semantic_model_governance(semantic_rows, minimum_version_sample=MINIMUM_SAMPLE)
-    evidence_governance = assess_evidence_governance(analyzed_count=quality["analyzed_comment_count"], pending_count=quality["pending_comment_count"], failed_count=quality["failed_comment_count"], quality_status=quality["status"], quality_score=quality["quality_score"], freshness_status=freshness["status"], minimum=MINIMUM_SAMPLE)
+    semantic_model_governance = assess_semantic_model_governance(
+        semantic_rows, minimum_version_sample=MINIMUM_SAMPLE
+    )
+    evidence_governance = assess_evidence_governance(
+        analyzed_count=quality["analyzed_comment_count"],
+        pending_count=quality["pending_comment_count"],
+        failed_count=quality["failed_comment_count"],
+        quality_status=quality["status"],
+        quality_score=quality["quality_score"],
+        freshness_status=freshness["status"],
+        minimum=MINIMUM_SAMPLE,
+    )
     access_tier = "full" if has_analytics_plan else "free_teaser"
-    upgrade_message = None if has_analytics_plan else "You are seeing a free taste of the strongest conversation intelligence. Subscribe to unlock deeper perspectives, cross-lens comparisons, temporal intelligence, and decision context."
+    upgrade_message = (
+        None
+        if has_analytics_plan
+        else "You are seeing a free taste of the strongest conversation intelligence. Subscribe to unlock deeper perspectives, cross-lens comparisons, temporal intelligence, and decision context."
+    )
 
     temporal_rows = await get_comment_intelligence_temporal_rows(db, p.id, since)
-    temporal = build_temporal_intelligence(temporal_rows, period_start=since, period_end=period_end, minimum=MINIMUM_SAMPLE)
+    temporal = build_temporal_intelligence(
+        temporal_rows, period_start=since, period_end=period_end, minimum=MINIMUM_SAMPLE
+    )
 
     semantic_participant_rows = await get_comment_intelligence_participant_rows(
         db, p.id, since
@@ -973,7 +1028,9 @@ async def perception_analytics(
     )
 
     semantic_data = composed["semantic"]["semantic_evidence"]
-    semantic_observed = {item["type"]: item["observed"] for item in semantic_data["evidence"]}
+    semantic_observed = {
+        item["type"]: item["observed"] for item in semantic_data["evidence"]
+    }
     semantic_available = semantic_data["evidence_status"] == "available"
 
     semantic = {
@@ -1020,21 +1077,33 @@ async def perception_analytics(
         "Decision context reframes observed evidence and does not establish causation or prediction.",
     ]
     if is_author:
-        methodology_rules.insert(0, "Creator analytics require an analytics-enabled plan.")
+        methodology_rules.insert(
+            0, "Creator analytics require an analytics-enabled plan."
+        )
 
     patterns = composed["patterns"]
     signals = composed["signals"]
     if not evidence_governance["patterns_eligible"]:
-        patterns=[]
-        signals=[]
+        patterns = []
+        signals = []
     elif not evidence_governance["signals_eligible"]:
-        signals=[]
+        signals = []
 
     if access_tier == "free_teaser":
         patterns = patterns[:1]
         signals = signals[:1]
-        perspective = {**perspective, "professional": [], "geographic": [], "cross_lens": []}
-        temporal = {**temporal, "buckets": [], "changes": [], "qualifying_bucket_count": 0}
+        perspective = {
+            **perspective,
+            "professional": [],
+            "geographic": [],
+            "cross_lens": [],
+        }
+        temporal = {
+            **temporal,
+            "buckets": [],
+            "changes": [],
+            "qualifying_bucket_count": 0,
+        }
 
     try:
         decision = build_decision_intelligence(
@@ -1042,9 +1111,7 @@ async def perception_analytics(
             patterns=patterns,
             signals=signals,
             cross_lens_analysis=composed["cross_lens_comparison"],
-            temporal={
-                "changes": temporal["changes"]
-            },
+            temporal={"changes": temporal["changes"]},
             minimum=MINIMUM_SAMPLE,
         )
     except ValueError as exc:
@@ -1056,27 +1123,53 @@ async def perception_analytics(
             # The API contract intentionally has only available/insufficient_sample.
             # Free-tier limitation is expressed through the summary/limitations,
             # not by inventing a third decision status.
-            "status": "available" if decision.get("observations") else "insufficient_sample",
+            "status": (
+                "available" if decision.get("observations") else "insufficient_sample"
+            ),
             "summary": "A limited view of the strongest evidence-backed observation is available on the free plan.",
             "observations": decision.get("observations", [])[:1],
             "considerations": [],
             "guardrail": decision.get("guardrail"),
-            "limitations": ["Subscribe to unlock deeper decision framing and comparative intelligence."],
+            "limitations": [
+                "Subscribe to unlock deeper decision framing and comparative intelligence."
+            ],
         }
 
     measurements = {
-        "likes": {"value": likes, "available": True, "description": "Likes recorded during the selected period."},
-        "comments": {"value": comments, "available": True, "description": "Comments recorded during the selected period."},
-        "views": {"value": views if is_author and has_analytics_plan else None, "available": is_author and has_analytics_plan, "description": "Views recorded during the selected period; creator-only."},
-        "shares": {"value": shares if is_author and has_analytics_plan else None, "available": is_author and has_analytics_plan, "description": "Shares recorded during the selected period; creator-only."},
+        "likes": {
+            "value": likes,
+            "available": True,
+            "description": "Likes recorded during the selected period.",
+        },
+        "comments": {
+            "value": comments,
+            "available": True,
+            "description": "Comments recorded during the selected period.",
+        },
+        "views": {
+            "value": views if is_author and has_analytics_plan else None,
+            "available": is_author and has_analytics_plan,
+            "description": "Views recorded during the selected period; creator-only.",
+        },
+        "shares": {
+            "value": shares if is_author and has_analytics_plan else None,
+            "available": is_author and has_analytics_plan,
+            "description": "Shares recorded during the selected period; creator-only.",
+        },
         "engagement_rate": {
-            "value": (round((likes + comments + shares) / views, 4) if views else 0.0) if is_author and has_analytics_plan else None,
+            "value": (
+                (round((likes + comments + shares) / views, 4) if views else 0.0)
+                if is_author and has_analytics_plan
+                else None
+            ),
             "available": is_author and has_analytics_plan,
             "description": "(likes + comments + shares) / views for the selected period; creator-only.",
         },
-        "daily_activity": [
-            {"date": str(d), "interactions": int(c)} for d, c in activity
-        ] if is_author and has_analytics_plan else [],
+        "daily_activity": (
+            [{"date": str(d), "interactions": int(c)} for d, c in activity]
+            if is_author and has_analytics_plan
+            else []
+        ),
     }
 
     return PerceptionIntelligence(
@@ -1091,8 +1184,10 @@ async def perception_analytics(
             "scope": "creator_analytics" if is_author else "conversation_intelligence",
             "viewer_lens": "author" if is_author else "observer",
             "author": {
-                "professional_role": p.user.primary_professional_role_label or p.user.profession,
-                "verified": p.user.verification_status == "VERIFIED" and bool(p.user.verified_professional_roles),
+                "professional_role": p.user.primary_professional_role_label
+                or p.user.profession,
+                "verified": p.user.verification_status == "VERIFIED"
+                and bool(p.user.verified_professional_roles),
             },
             "access_tier": access_tier,
             "upgrade_available": not has_analytics_plan,
@@ -1111,19 +1206,37 @@ async def perception_analytics(
                 "available": audience_available,
                 "countries": [
                     {"country_code": code, "participants": count}
-                    for code, count in sorted(country_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+                    for code, count in sorted(
+                        country_counts.items(), key=lambda item: item[1], reverse=True
+                    )[:10]
                 ],
                 "regions": [
                     {"region": region, "participants": count}
-                    for region, count in sorted(region_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+                    for region, count in sorted(
+                        region_counts.items(), key=lambda item: item[1], reverse=True
+                    )[:10]
                 ],
                 "professional_roles": [
-                    {"role_code": code, "role_label": role_label_by_code.get(code, code), "participants": count}
-                    for code, count in sorted(role_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+                    {
+                        "role_code": code,
+                        "role_label": role_label_by_code.get(code, code),
+                        "participants": count,
+                    }
+                    for code, count in sorted(
+                        role_counts.items(), key=lambda item: item[1], reverse=True
+                    )[:10]
                 ],
                 "verified_professional_roles": [
-                    {"role_code": code, "role_label": role_label_by_code.get(code, code), "participants": count}
-                    for code, count in sorted(verified_role_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+                    {
+                        "role_code": code,
+                        "role_label": role_label_by_code.get(code, code),
+                        "participants": count,
+                    }
+                    for code, count in sorted(
+                        verified_role_counts.items(),
+                        key=lambda item: item[1],
+                        reverse=True,
+                    )[:10]
                 ],
             },
         },
@@ -1143,6 +1256,107 @@ async def perception_analytics(
     )
 
 
+@router.get("/topics/{topic_id}", response_model=TopicIntelligence)
+async def topic_intelligence(
+    topic_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+    days: int = 180,
+    decision_intent: Literal[
+        "research",
+        "business",
+        "policy",
+        "journalism",
+        "education",
+        "product",
+        "professional",
+        "general_exploration",
+    ] = "general_exploration",
+):
+    """Aggregate evidence across active Perceptions belonging to one Topic."""
+    days = max(30, min(days, 365))
+    topic = await db.scalar(select(Topic).where(Topic.id == topic_id))
+    if topic is None:
+        raise HTTPException(404, "Topic not found")
+
+    subscription = await get_current_subscription(db, current_user.id)
+    has_analytics_plan = bool(
+        subscription and subscription.plan and subscription.plan.analytics_enabled
+    )
+    access_tier = "full" if has_analytics_plan else "free_teaser"
+    upgrade_message = (
+        None
+        if has_analytics_plan
+        else (
+            "Subscribe to unlock deeper Topic Intelligence perspectives, temporal analysis, and decision context."
+        )
+    )
+
+    now = datetime.now(timezone.utc)
+    period_start = now - timedelta(days=days)
+
+    perception_rows = (
+        await db.execute(
+            select(Perception.id, Perception.created_at)
+            .join(User, User.id == Perception.user_id)
+            .where(
+                Perception.topic_id == topic_id,
+                Perception.created_at <= now,
+                User.is_active.is_(True),
+            )
+            .order_by(Perception.created_at.asc())
+        )
+    ).all()
+    perception_ids = [row.id for row in perception_rows]
+
+    semantic_rows: list[tuple[CommentIntelligence, int, datetime]] = []
+    participant_rows: list[tuple[CommentIntelligence, User]] = []
+    if perception_ids:
+        result = await db.execute(
+            select(CommentIntelligence, Comment.perception_id, Comment.created_at)
+            .join(Comment, Comment.id == CommentIntelligence.comment_id)
+            .join(Perception, Perception.id == Comment.perception_id)
+            .join(User, User.id == Comment.user_id)
+            .where(
+                Comment.perception_id.in_(perception_ids),
+                Comment.created_at >= period_start,
+                Comment.created_at <= now,
+                CommentIntelligence.status == "analyzed",
+                User.is_active.is_(True),
+            )
+            .order_by(Comment.created_at.asc())
+        )
+        semantic_rows = list(result.all())
+
+        participant_result = await db.execute(
+            select(CommentIntelligence, User)
+            .join(Comment, Comment.id == CommentIntelligence.comment_id)
+            .join(Perception, Perception.id == Comment.perception_id)
+            .join(User, User.id == Comment.user_id)
+            .where(
+                Comment.perception_id.in_(perception_ids),
+                Comment.created_at >= period_start,
+                Comment.created_at <= now,
+                CommentIntelligence.status == "analyzed",
+                User.is_active.is_(True),
+            )
+        )
+        participant_rows = list(participant_result.all())
+
+    return build_topic_intelligence(
+        topic_id=topic.id,
+        topic_name=topic.name,
+        semantic_rows=semantic_rows,
+        participant_rows=participant_rows,
+        period_start=period_start,
+        period_end=now,
+        access_tier=access_tier,
+        upgrade_available=not has_analytics_plan,
+        upgrade_message=upgrade_message,
+        decision_intent=decision_intent,
+        minimum=TOPIC_SAMPLE_MINIMUM,
+    )
+
 
 @router.get("/compare", response_model=ComparativeIntelligence)
 async def compare_perceptions(
@@ -1151,8 +1365,14 @@ async def compare_perceptions(
     perception_ids: list[int] = Query(min_length=2, max_length=COMPARISON_LIMIT),
     days: int = 30,
     decision_intent: Literal[
-        "research", "business", "policy", "journalism", "education",
-        "product", "professional", "general_exploration"
+        "research",
+        "business",
+        "policy",
+        "journalism",
+        "education",
+        "product",
+        "professional",
+        "general_exploration",
     ] = "general_exploration",
 ):
     await require_analytics_access(db, current_user.id)
@@ -1160,28 +1380,41 @@ async def compare_perceptions(
         raise HTTPException(422, "perception_ids must be unique")
     days = max(7, min(days, 365))
     perceptions = (
-        await db.execute(
-            select(Perception)
-            .options(selectinload(Perception.topic))
-            .where(Perception.user_id == current_user.id, Perception.id.in_(perception_ids))
-            .order_by(Perception.created_at.desc())
+        (
+            await db.execute(
+                select(Perception)
+                .options(selectinload(Perception.topic))
+                .where(
+                    Perception.user_id == current_user.id,
+                    Perception.id.in_(perception_ids),
+                )
+                .order_by(Perception.created_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if len(perceptions) != len(perception_ids):
-        raise HTTPException(404, "One or more perceptions were not found in your portfolio")
+        raise HTTPException(
+            404, "One or more perceptions were not found in your portfolio"
+        )
 
     now = datetime.now(timezone.utc)
     datasets: list[dict] = []
     for perception in perceptions:
         since = max(perception.created_at, now - timedelta(days=days))
         rows = await get_comment_intelligence_rows(db, perception.id, since)
-        datasets.append({
-            "perception_id": perception.id,
-            "title": perception.body[:80],
-            "topic_name": perception.topic.name if perception.topic else None,
-            "rows": rows,
-        })
-    return build_comparative_intelligence(datasets, minimum=MINIMUM_SAMPLE, intent=decision_intent)
+        datasets.append(
+            {
+                "perception_id": perception.id,
+                "title": perception.body[:80],
+                "topic_name": perception.topic.name if perception.topic else None,
+                "rows": rows,
+            }
+        )
+    return build_comparative_intelligence(
+        datasets, minimum=MINIMUM_SAMPLE, intent=decision_intent
+    )
 
 
 @router.get("/profile", response_model=ProfileIntelligence)
@@ -1197,25 +1430,35 @@ async def profile_intelligence(
     period_start = now - timedelta(days=days)
 
     perceptions = (
-        await db.execute(
-            select(Perception)
-            .join(User, User.id == Perception.user_id)
-            .options(selectinload(Perception.topic))
-            .where(
-                Perception.user_id == current_user.id,
-                User.is_active.is_(True),
-                Perception.created_at >= period_start,
-                Perception.created_at <= now,
+        (
+            await db.execute(
+                select(Perception)
+                .join(User, User.id == Perception.user_id)
+                .options(selectinload(Perception.topic))
+                .where(
+                    Perception.user_id == current_user.id,
+                    User.is_active.is_(True),
+                    Perception.created_at >= period_start,
+                    Perception.created_at <= now,
+                )
+                .order_by(Perception.created_at.asc())
             )
-            .order_by(Perception.created_at.asc())
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     perception_ids = [p.id for p in perceptions]
     semantic_rows = []
     if perception_ids:
         result = await db.execute(
-            select(CommentIntelligence, Comment.perception_id, Perception.topic_id, Topic.name, Comment.created_at)
+            select(
+                CommentIntelligence,
+                Comment.perception_id,
+                Perception.topic_id,
+                Topic.name,
+                Comment.created_at,
+            )
             .join(Comment, Comment.id == CommentIntelligence.comment_id)
             .join(Perception, Perception.id == Comment.perception_id)
             .outerjoin(Topic, Topic.id == Perception.topic_id)

@@ -4,30 +4,67 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession, OptionalUser
-from app.models.models import AnalyticsTopic, Comment, Follow, Like, Message, Perception, Topic, TopicFollow, User
+from app.models.models import (
+    AnalyticsTopic,
+    Comment,
+    Follow,
+    Like,
+    Message,
+    Perception,
+    Topic,
+    TopicFollow,
+    User,
+)
 from app.schemas.content import PerceptionOut, TopicOut
 from app.schemas.business import AnalyticsProfileUpdate
-from app.schemas.user import UpdateMeRequest, UserMe, UserProfile, UserSlim, UserPreferencesUpdate
+from app.schemas.user import (
+    UpdateMeRequest,
+    UserMe,
+    UserProfile,
+    UserSlim,
+    UserPreferencesUpdate,
+)
 from app.services.storage import ALLOWED_IMAGE_TYPES, save_upload
 from app.services.subscriptions import require_analytics_access
 from app.services.notifications import notify
-from app.services.professional_taxonomy import INDUSTRIES, ROLES, validate_identity_selection, ROLE_MAP
+from app.services.professional_taxonomy import (
+    INDUSTRIES,
+    ROLES,
+    validate_identity_selection,
+    ROLE_MAP,
+)
 
 router = APIRouter(tags=["users"])
 
 
 async def _profile_counts(db: DbSession, user_id: int) -> dict[str, int]:
     perceptions_count = (
-        await db.execute(select(func.count()).select_from(Perception).where(Perception.user_id == user_id))
+        await db.execute(
+            select(func.count())
+            .select_from(Perception)
+            .where(Perception.user_id == user_id)
+        )
     ).scalar_one()
     followers_count = (
-        await db.execute(select(func.count()).select_from(Follow).where(Follow.followed_id == user_id))
+        await db.execute(
+            select(func.count())
+            .select_from(Follow)
+            .where(Follow.followed_id == user_id)
+        )
     ).scalar_one()
     following_count = (
-        await db.execute(select(func.count()).select_from(Follow).where(Follow.follower_id == user_id))
+        await db.execute(
+            select(func.count())
+            .select_from(Follow)
+            .where(Follow.follower_id == user_id)
+        )
     ).scalar_one()
     topics_count = (
-        await db.execute(select(func.count()).select_from(TopicFollow).where(TopicFollow.user_id == user_id))
+        await db.execute(
+            select(func.count())
+            .select_from(TopicFollow)
+            .where(TopicFollow.user_id == user_id)
+        )
     ).scalar_one()
     return {
         "perceptions_count": perceptions_count,
@@ -37,10 +74,10 @@ async def _profile_counts(db: DbSession, user_id: int) -> dict[str, int]:
     }
 
 
-
 @router.get("/professional-taxonomy")
 async def professional_taxonomy():
     return {"industries": INDUSTRIES, "roles": ROLES}
+
 
 @router.get("/user", response_model=UserMe)
 async def get_me(current_user: CurrentUser):
@@ -75,10 +112,26 @@ async def update_preferences(
 
 @router.put("/user", response_model=UserMe)
 async def update_me(payload: UpdateMeRequest, current_user: CurrentUser, db: DbSession):
-    if payload.professional_industries is not None or payload.professional_roles is not None or payload.primary_professional_role is not None:
-        industries = payload.professional_industries if payload.professional_industries is not None else list(current_user.professional_industries or [])
-        roles = payload.professional_roles if payload.professional_roles is not None else list(current_user.professional_roles or [])
-        primary_role = payload.primary_professional_role if payload.primary_professional_role is not None else current_user.primary_professional_role
+    if (
+        payload.professional_industries is not None
+        or payload.professional_roles is not None
+        or payload.primary_professional_role is not None
+    ):
+        industries = (
+            payload.professional_industries
+            if payload.professional_industries is not None
+            else list(current_user.professional_industries or [])
+        )
+        roles = (
+            payload.professional_roles
+            if payload.professional_roles is not None
+            else list(current_user.professional_roles or [])
+        )
+        primary_role = (
+            payload.primary_professional_role
+            if payload.primary_professional_role is not None
+            else current_user.primary_professional_role
+        )
         try:
             validate_identity_selection(industries, roles, primary_role)
         except ValueError as exc:
@@ -134,13 +187,19 @@ async def update_analytics_profile(
 
     if topic_ids:
         valid_ids = (
-            await db.execute(select(Topic.id).where(Topic.id.in_(topic_ids)))
-        ).scalars().all()
+            (await db.execute(select(Topic.id).where(Topic.id.in_(topic_ids))))
+            .scalars()
+            .all()
+        )
         if len(valid_ids) != len(topic_ids):
-            raise HTTPException(status_code=422, detail="One or more analytics topics are invalid.")
+            raise HTTPException(
+                status_code=422, detail="One or more analytics topics are invalid."
+            )
 
     if country_supplied:
-        current_user.country_code = payload.country_code.upper() if payload.country_code else None
+        current_user.country_code = (
+            payload.country_code.upper() if payload.country_code else None
+        )
     if region_supplied:
         current_user.region = payload.region
     if city_supplied:
@@ -151,7 +210,9 @@ async def update_analytics_profile(
         current_user.analytics_specialties = topic_ids
 
         await db.execute(
-            AnalyticsTopic.__table__.delete().where(AnalyticsTopic.user_id == current_user.id)
+            AnalyticsTopic.__table__.delete().where(
+                AnalyticsTopic.user_id == current_user.id
+            )
         )
         for topic_id in topic_ids:
             db.add(AnalyticsTopic(user_id=current_user.id, topic_id=topic_id))
@@ -174,7 +235,9 @@ async def update_profile(
     avatar: UploadFile | None = File(default=None),
 ):
     if avatar is not None:
-        current_user.avatar_url = await save_upload(avatar, "avatars", allowed_types=ALLOWED_IMAGE_TYPES)
+        current_user.avatar_url = await save_upload(
+            avatar, "avatars", allowed_types=ALLOWED_IMAGE_TYPES
+        )
     if profession is not None:
         current_user.profession = profession
     if bio is not None:
@@ -195,14 +258,45 @@ async def update_profile(
 
 @router.get("/users/{user_id}", response_model=UserProfile)
 async def get_user_profile(user_id: int, db: DbSession, viewer: OptionalUser):
-    user = await db.scalar(select(User).where(User.id == user_id, User.is_active.is_(True)))
-    if user is None: raise HTTPException(status_code=404, detail="User not found")
+    user = await db.scalar(
+        select(User).where(User.id == user_id, User.is_active.is_(True))
+    )
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
     counts = await _profile_counts(db, user_id)
-    following = False; can_message = False
+    following = False
+    can_message = False
     if viewer and viewer.id != user_id:
-        following = (await db.scalar(select(Follow.follower_id).where(Follow.follower_id == viewer.id, Follow.followed_id == user_id))) is not None
-        reciprocal = (await db.scalar(select(Follow.follower_id).where(Follow.follower_id == user_id, Follow.followed_id == viewer.id))) is not None
-        existing = (await db.scalar(select(Message.id).where(((Message.from_user_id == viewer.id) & (Message.to_user_id == user_id)) | ((Message.from_user_id == user_id) & (Message.to_user_id == viewer.id))).limit(1))) is not None
+        following = (
+            await db.scalar(
+                select(Follow.follower_id).where(
+                    Follow.follower_id == viewer.id, Follow.followed_id == user_id
+                )
+            )
+        ) is not None
+        reciprocal = (
+            await db.scalar(
+                select(Follow.follower_id).where(
+                    Follow.follower_id == user_id, Follow.followed_id == viewer.id
+                )
+            )
+        ) is not None
+        existing = (
+            await db.scalar(
+                select(Message.id)
+                .where(
+                    (
+                        (Message.from_user_id == viewer.id)
+                        & (Message.to_user_id == user_id)
+                    )
+                    | (
+                        (Message.from_user_id == user_id)
+                        & (Message.to_user_id == viewer.id)
+                    )
+                )
+                .limit(1)
+            )
+        ) is not None
         can_message = existing or (following and reciprocal)
     return UserProfile(
         id=user.id,
@@ -218,11 +312,16 @@ async def get_user_profile(user_id: int, db: DbSession, viewer: OptionalUser):
         **counts,
     )
 
+
 @router.get("/users/{user_id}/perceptions", response_model=list[PerceptionOut])
 async def get_user_perceptions(user_id: int, db: DbSession):
-    exists = await db.execute(select(User.id).where(User.id == user_id, User.is_active.is_(True)))
+    exists = await db.execute(
+        select(User.id).where(User.id == user_id, User.is_active.is_(True))
+    )
     if exists.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     result = await db.execute(
         select(Perception)
@@ -235,14 +334,22 @@ async def get_user_perceptions(user_id: int, db: DbSession):
     out = []
     for p in perceptions:
         likes_count = (
-            await db.execute(select(func.count()).select_from(Like).where(Like.perception_id == p.id))
+            await db.execute(
+                select(func.count()).select_from(Like).where(Like.perception_id == p.id)
+            )
         ).scalar_one()
         comments_count = (
-            await db.execute(select(func.count()).select_from(Comment).where(Comment.perception_id == p.id))
+            await db.execute(
+                select(func.count())
+                .select_from(Comment)
+                .where(Comment.perception_id == p.id)
+            )
         ).scalar_one()
         out.append(
             PerceptionOut(
-                **PerceptionOut.model_validate(p).model_dump(exclude={"likes_count", "comments_count"}),
+                **PerceptionOut.model_validate(p).model_dump(
+                    exclude={"likes_count", "comments_count"}
+                ),
                 likes_count=likes_count,
                 comments_count=comments_count,
             )
@@ -253,7 +360,9 @@ async def get_user_perceptions(user_id: int, db: DbSession):
 @router.get("/users/{user_id}/topics", response_model=list[TopicOut])
 async def get_user_followed_topics(user_id: int, db: DbSession):
     result = await db.execute(
-        select(Topic).join(TopicFollow, TopicFollow.topic_id == Topic.id).where(TopicFollow.user_id == user_id)
+        select(Topic)
+        .join(TopicFollow, TopicFollow.topic_id == Topic.id)
+        .where(TopicFollow.user_id == user_id)
     )
     return result.scalars().all()
 
@@ -261,26 +370,46 @@ async def get_user_followed_topics(user_id: int, db: DbSession):
 @router.post("/users/{user_id}/follow")
 async def follow_user(user_id: int, current_user: CurrentUser, db: DbSession):
     if current_user.id == user_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot follow yourself")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot follow yourself"
+        )
 
-    target = await db.execute(select(User.id).where(User.id == user_id, User.is_active.is_(True)))
+    target = await db.execute(
+        select(User.id).where(User.id == user_id, User.is_active.is_(True))
+    )
     if target.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     existing = await db.execute(
-        select(Follow).where(Follow.follower_id == current_user.id, Follow.followed_id == user_id)
+        select(Follow).where(
+            Follow.follower_id == current_user.id, Follow.followed_id == user_id
+        )
     )
     if existing.scalar_one_or_none() is None:
         db.add(Follow(follower_id=current_user.id, followed_id=user_id))
         await db.commit()
-        await notify(db, user_id=user_id, ntype="follow", data={"actor_id": current_user.id, "actor_name": current_user.name, "message": f"{current_user.name} followed you."}, commit=True)
+        await notify(
+            db,
+            user_id=user_id,
+            ntype="follow",
+            data={
+                "actor_id": current_user.id,
+                "actor_name": current_user.name,
+                "message": f"{current_user.name} followed you.",
+            },
+            commit=True,
+        )
     return {"message": f"Now following user {user_id}"}
 
 
 @router.delete("/users/{user_id}/follow")
 async def unfollow_user(user_id: int, current_user: CurrentUser, db: DbSession):
     existing = await db.execute(
-        select(Follow).where(Follow.follower_id == current_user.id, Follow.followed_id == user_id)
+        select(Follow).where(
+            Follow.follower_id == current_user.id, Follow.followed_id == user_id
+        )
     )
     follow = existing.scalar_one_or_none()
     if follow is not None:
@@ -292,7 +421,9 @@ async def unfollow_user(user_id: int, current_user: CurrentUser, db: DbSession):
 @router.get("/users/{user_id}/followers", response_model=list[UserSlim])
 async def get_followers(user_id: int, db: DbSession):
     result = await db.execute(
-        select(User).join(Follow, Follow.follower_id == User.id).where(Follow.followed_id == user_id, User.is_active.is_(True))
+        select(User)
+        .join(Follow, Follow.follower_id == User.id)
+        .where(Follow.followed_id == user_id, User.is_active.is_(True))
     )
     return result.scalars().all()
 
@@ -300,6 +431,8 @@ async def get_followers(user_id: int, db: DbSession):
 @router.get("/users/{user_id}/following", response_model=list[UserSlim])
 async def get_following(user_id: int, db: DbSession):
     result = await db.execute(
-        select(User).join(Follow, Follow.followed_id == User.id).where(Follow.follower_id == user_id, User.is_active.is_(True))
+        select(User)
+        .join(Follow, Follow.followed_id == User.id)
+        .where(Follow.follower_id == user_id, User.is_active.is_(True))
     )
     return result.scalars().all()

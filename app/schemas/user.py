@@ -27,6 +27,7 @@ class UserPublic(BaseModel):
 
 class UserProfile(UserPublic):
     """Public profile + engagement counts; never exposes account credentials."""
+
     perceptions_count: int = 0
     followers_count: int = 0
     following_count: int = 0
@@ -84,14 +85,22 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, value: str) -> str:
-        if not any(c.isupper() for c in value) or not any(c.islower() for c in value) or not any(c.isdigit() for c in value) or not any(not c.isalnum() for c in value):
-            raise ValueError("Password must contain uppercase, lowercase, number, and special character.")
+        if (
+            not any(c.isupper() for c in value)
+            or not any(c.islower() for c in value)
+            or not any(c.isdigit() for c in value)
+            or not any(not c.isalnum() for c in value)
+        ):
+            raise ValueError(
+                "Password must contain uppercase, lowercase, number, and special character."
+            )
         return value
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
 
 class GoogleLoginRequest(BaseModel):
     id_token: str = Field(min_length=20, max_length=8192)
@@ -136,7 +145,9 @@ class ResetPasswordRequest(BaseModel):
             or not any(c.isdigit() for c in value)
             or not any(not c.isalnum() for c in value)
         ):
-            raise ValueError("Password must contain uppercase, lowercase, number, and special character.")
+            raise ValueError(
+                "Password must contain uppercase, lowercase, number, and special character."
+            )
         return value
 
 
@@ -154,7 +165,9 @@ class ChangePasswordRequest(BaseModel):
             or not any(c.isdigit() for c in value)
             or not any(not c.isalnum() for c in value)
         ):
-            raise ValueError("Password must contain uppercase, lowercase, number, and special character.")
+            raise ValueError(
+                "Password must contain uppercase, lowercase, number, and special character."
+            )
         return value
 
 

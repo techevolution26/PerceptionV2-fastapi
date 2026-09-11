@@ -39,10 +39,15 @@ async def lifespan(_app: FastAPI):
     stop_scheduler(scheduler)
 
 
+docs_enabled = settings.ENVIRONMENT != "production"
+
 app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
     lifespan=lifespan,
+    docs_url="/docs" if docs_enabled else None,
+    redoc_url="/redoc" if docs_enabled else None,
+    openapi_url="/openapi.json" if docs_enabled else None,
 )
 
 
@@ -52,10 +57,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=()"
+        )
         if settings.ENVIRONMENT == "production":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
         return response
+
 
 app.add_middleware(SecurityHeadersMiddleware)
 
@@ -70,7 +82,11 @@ app.add_middleware(
 # Serves uploaded avatars/media at /storage/... — matches Laravel's public
 # disk convention, which the frontend's next.config.js already rewrites
 # `/storage/:path*` requests to hit.
-app.mount(settings.STORAGE_URL_PREFIX, StaticFiles(directory=settings.STORAGE_ROOT), name="storage")
+app.mount(
+    settings.STORAGE_URL_PREFIX,
+    StaticFiles(directory=settings.STORAGE_ROOT),
+    name="storage",
+)
 
 for router in (
     health,
