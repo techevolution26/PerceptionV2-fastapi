@@ -15,7 +15,8 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.models.models import Motivation, Plan, Topic
 
-# Synchronized and matching your authentic Laravel seed collection including image_urls
+# Synchronized and matching  authentic
+# seed collection including image_urls
 TOPICS = [
     {
         "name": "Business",

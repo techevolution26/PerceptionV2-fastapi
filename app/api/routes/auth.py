@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -24,6 +26,7 @@ from app.schemas.user import (
 
 router = APIRouter(tags=["auth"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 async def _rate_limit(request: Request, *, bucket: str = "login", identity: str | None = None, limit: int | None = None):
@@ -32,12 +35,21 @@ async def _rate_limit(request: Request, *, bucket: str = "login", identity: str 
     digest = hashlib.sha256(key_identity.strip().lower().encode()).hexdigest()
     key = f"auth:{bucket}:{digest}"
     try:
-        redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
-        count = await redis.incr(key)
-        if count == 1:
-            await redis.expire(key, 60)
-        await redis.aclose()
-    except Exception:
+        async with Redis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        ) as redis:
+            count = await redis.incr(key)
+            if count == 1:
+                await redis.expire(key, 60)
+    except Exception as exc:
+        logger.warning(
+            "Authentication rate-limit dependency unavailable: %s",
+            type(exc).__name__,
+            extra={"bucket": bucket, "redis_url_configured": bool(settings.REDIS_URL)},
+        )
         if settings.RATE_LIMIT_FAIL_OPEN:
             return
         raise HTTPException(503, "Authentication service temporarily unavailable.")
