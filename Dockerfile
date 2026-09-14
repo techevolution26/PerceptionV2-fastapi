@@ -6,9 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        libjpeg62-turbo-dev \
-        zlib1g-dev \
+    build-essential \
+    libjpeg62-turbo-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -18,7 +18,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
 
-# Stage 1: Clean runtime image
+# Stage1: Cleaning runtime image
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -26,14 +26,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl \
-        libjpeg62-turbo \
-        zlib1g \
+    curl \
+    libjpeg62-turbo \
+    zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r app && useradd -r -g app -d /app app
 
-# FIXED: Replaced --from=builder with --from=0 to completely bypass name resolution bugs
+# FIXing:Replaced --from=builder with --from=0 to completely bypass name resolution bugs
 COPY --from=0 /opt/venv /opt/venv
 
 WORKDIR /app
@@ -45,10 +45,11 @@ RUN chmod +x /app/docker-entrypoint.sh \
 
 USER app
 
-EXPOSE 8000
+# Updated fallback port exposure standard
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f "http://localhost:${PORT:-8000}/api/health" || exit 1
+    CMD curl -f "http://localhost:${PORT:-8080}/api/health" || exit 1
 
 ENTRYPOINT ["/bin/sh", "/app/docker-entrypoint.sh"]
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

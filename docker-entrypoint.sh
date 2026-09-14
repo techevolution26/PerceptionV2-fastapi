@@ -1,5 +1,4 @@
 #!/bin/sh
-# docker-entrypoint.sh
 set -e
 
 echo "Waiting for database..."
@@ -36,5 +35,5 @@ echo "Seeding baseline reference data..."
 python -m app.seed || true
 
 echo "Starting application..."
-echo "Listening on 0.0.0.0:${PORT:-8000}"
+echo "Listening on 0.0.0.0:${PORT:-8080}"
 exec "$@"
