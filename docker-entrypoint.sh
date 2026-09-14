@@ -27,10 +27,14 @@ asyncio.run(wait())
 "
 
 echo "Running database migrations..."
-alembic upgrade head
+if ! alembic upgrade head; then
+    echo "Database migrations failed; application will not start." >&2
+    exit 1
+fi
 
 echo "Seeding baseline reference data..."
 python -m app.seed || true
 
 echo "Starting application..."
+echo "Listening on 0.0.0.0:${PORT:-8000}"
 exec "$@"
