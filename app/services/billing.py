@@ -44,22 +44,34 @@ class StripeBillingProvider:
         return {"Authorization": f"Bearer {self.secret_key}"}
 
     async def _post(self, path: str, data: dict[str, str]) -> dict[str, Any]:
-        async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
+        async with httpx.AsyncClient(
+            base_url=self.base_url, timeout=self.timeout
+        ) as client:
             response = await client.post(path, headers=self._headers(), data=data)
         if response.is_error:
             try:
-                detail = response.json().get("error", {}).get("message", "Stripe request failed")
+                detail = (
+                    response.json()
+                    .get("error", {})
+                    .get("message", "Stripe request failed")
+                )
             except (ValueError, AttributeError):
                 detail = "Stripe request failed"
             raise BillingProviderError(str(detail))
         return response.json()
 
     async def _get(self, path: str, params: dict[str, str]) -> dict[str, Any]:
-        async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
+        async with httpx.AsyncClient(
+            base_url=self.base_url, timeout=self.timeout
+        ) as client:
             response = await client.get(path, headers=self._headers(), params=params)
         if response.is_error:
             try:
-                detail = response.json().get("error", {}).get("message", "Stripe request failed")
+                detail = (
+                    response.json()
+                    .get("error", {})
+                    .get("message", "Stripe request failed")
+                )
             except (ValueError, AttributeError):
                 detail = "Stripe request failed"
             raise BillingProviderError(str(detail))
@@ -103,19 +115,27 @@ class StripeBillingProvider:
             id=str(result["id"]),
             url=str(result["url"]),
             customer_id=customer_id,
-            subscription_id=str(result["subscription"]) if result.get("subscription") else None,
+            subscription_id=(
+                str(result["subscription"]) if result.get("subscription") else None
+            ),
         )
 
     async def create_portal_session(self, *, customer_id: str) -> str:
         result = await self._post("/billing_portal/sessions", {"customer": customer_id})
         return str(result["url"])
 
-    async def list_invoices(self, *, customer_id: str, limit: int = 20) -> list[dict[str, Any]]:
-        result = await self._get("/invoices", {"customer": customer_id, "limit": str(limit)})
+    async def list_invoices(
+        self, *, customer_id: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        result = await self._get(
+            "/invoices", {"customer": customer_id, "limit": str(limit)}
+        )
         return list(result.get("data", []))
 
     @staticmethod
-    def verify_webhook(payload: bytes, signature: str, secret: str, tolerance_seconds: int = 300) -> dict[str, Any]:
+    def verify_webhook(
+        payload: bytes, signature: str, secret: str, tolerance_seconds: int = 300
+    ) -> dict[str, Any]:
         if not secret:
             raise BillingProviderError("Stripe webhook secret is not configured.")
         timestamp: str | None = None
@@ -135,8 +155,12 @@ class StripeBillingProvider:
         if abs(int(time.time()) - timestamp_int) > tolerance_seconds:
             raise BillingProviderError("Expired Stripe webhook signature.")
         signed_payload = f"{timestamp}.{payload.decode('utf-8')}".encode("utf-8")
-        expected = hmac.new(secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
-        if not any(hmac.compare_digest(expected, candidate) for candidate in signatures):
+        expected = hmac.new(
+            secret.encode("utf-8"), signed_payload, hashlib.sha256
+        ).hexdigest()
+        if not any(
+            hmac.compare_digest(expected, candidate) for candidate in signatures
+        ):
             raise BillingProviderError("Invalid Stripe webhook signature.")
         try:
             return json.loads(payload)

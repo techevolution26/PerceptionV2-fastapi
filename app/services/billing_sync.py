@@ -18,9 +18,9 @@ def _dt_from_unix(value: Any) -> datetime | None:
     return datetime.fromtimestamp(int(value), tz=timezone.utc)
 
 
-
-
-async def sync_stripe_subscription(db: AsyncSession, stripe_subscription: dict[str, Any]) -> Subscription | None:
+async def sync_stripe_subscription(
+    db: AsyncSession, stripe_subscription: dict[str, Any]
+) -> Subscription | None:
     metadata = stripe_subscription.get("metadata") or {}
     user_id_raw = metadata.get("user_id")
     plan_code = metadata.get("plan_code")
@@ -30,7 +30,10 @@ async def sync_stripe_subscription(db: AsyncSession, stripe_subscription: dict[s
 
     sub_result = await db.execute(
         select(Subscription)
-        .where(Subscription.provider == "stripe", Subscription.provider_subscription_id == stripe_subscription_id)
+        .where(
+            Subscription.provider == "stripe",
+            Subscription.provider_subscription_id == stripe_subscription_id,
+        )
         .options(selectinload(Subscription.plan))
     )
     sub = sub_result.scalar_one_or_none()
@@ -43,7 +46,9 @@ async def sync_stripe_subscription(db: AsyncSession, stripe_subscription: dict[s
         if user_id is not None:
             sub_result = await db.execute(
                 select(Subscription)
-                .where(Subscription.user_id == user_id, Subscription.provider == "stripe")
+                .where(
+                    Subscription.user_id == user_id, Subscription.provider == "stripe"
+                )
                 .order_by(Subscription.starts_at.desc())
                 .options(selectinload(Subscription.plan))
             )
@@ -60,8 +65,13 @@ async def sync_stripe_subscription(db: AsyncSession, stripe_subscription: dict[s
                 plan_id=plan.id,
                 provider="stripe",
                 provider_subscription_id=str(stripe_subscription_id),
-                provider_customer_id=str(stripe_subscription.get("customer")) if stripe_subscription.get("customer") else None,
-                starts_at=_dt_from_unix(stripe_subscription.get("start_date")) or datetime.now(timezone.utc),
+                provider_customer_id=(
+                    str(stripe_subscription.get("customer"))
+                    if stripe_subscription.get("customer")
+                    else None
+                ),
+                starts_at=_dt_from_unix(stripe_subscription.get("start_date"))
+                or datetime.now(timezone.utc),
             )
             db.add(sub)
         elif sub is not None and plan is not None:
@@ -75,10 +85,16 @@ async def sync_stripe_subscription(db: AsyncSession, stripe_subscription: dict[s
     if stripe_subscription.get("customer"):
         sub.provider_customer_id = str(stripe_subscription["customer"])
     sub.provider_subscription_id = str(stripe_subscription_id)
-    sub.current_period_start = _dt_from_unix(stripe_subscription.get("current_period_start"))
-    sub.current_period_end = _dt_from_unix(stripe_subscription.get("current_period_end"))
+    sub.current_period_start = _dt_from_unix(
+        stripe_subscription.get("current_period_start")
+    )
+    sub.current_period_end = _dt_from_unix(
+        stripe_subscription.get("current_period_end")
+    )
     sub.trial_ends_at = _dt_from_unix(stripe_subscription.get("trial_end"))
-    sub.cancel_at_period_end = bool(stripe_subscription.get("cancel_at_period_end", False))
+    sub.cancel_at_period_end = bool(
+        stripe_subscription.get("cancel_at_period_end", False)
+    )
     sub.canceled_at = _dt_from_unix(stripe_subscription.get("canceled_at"))
     sub.ends_at = sub.current_period_end if sub.cancel_at_period_end else None
     return sub
@@ -104,8 +120,12 @@ async def process_stripe_event(db: AsyncSession, event: dict[str, Any]) -> bool:
     if inserted.rowcount != 1:
         return False
 
-    obj = ((event.get("data") or {}).get("object") or {})
-    if event_type in {"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"}:
+    obj = (event.get("data") or {}).get("object") or {}
+    if event_type in {
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    }:
         await sync_stripe_subscription(db, obj)
     elif event_type == "checkout.session.completed":
         subscription_id = obj.get("subscription")
@@ -140,7 +160,10 @@ async def process_stripe_event(db: AsyncSession, event: dict[str, Any]) -> bool:
                 sub.status = "active"
 
     event_result = await db.execute(
-        select(BillingEvent).where(BillingEvent.provider == "stripe", BillingEvent.provider_event_id == event_id)
+        select(BillingEvent).where(
+            BillingEvent.provider == "stripe",
+            BillingEvent.provider_event_id == event_id,
+        )
     )
     billing_event = event_result.scalar_one()
     billing_event.processed_at = datetime.now(timezone.utc)

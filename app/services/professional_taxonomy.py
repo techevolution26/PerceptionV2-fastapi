@@ -218,7 +218,11 @@ _ROLES: list[tuple[str, str, str]] = [
     ("ngo_professional", "NGO Professional", "nonprofit"),
     ("project_manager", "Project Manager", "professional_services"),
     ("management_consultant", "Management Consultant", "professional_services"),
-    ("human_resources_specialist", "Human Resources Specialist", "professional_services"),
+    (
+        "human_resources_specialist",
+        "Human Resources Specialist",
+        "professional_services",
+    ),
     ("recruiter", "Recruiter", "professional_services"),
     ("manufacturing_engineer", "Manufacturing Engineer", "manufacturing"),
     ("production_manager", "Production Manager", "manufacturing"),
@@ -258,34 +262,96 @@ _ROLES: list[tuple[str, str, str]] = [
 # Compact icon keys consumed by clients. The client remains responsible for mapping
 # these keys to its icon library, so backend labels never dictate presentation.
 ICON_BY_ROLE: dict[str, str] = {
-    "physicist": "atom", "mathematician": "function", "statistician": "function",
-    "chemist": "flask-outline", "biologist": "microscope", "microbiologist": "microscope",
-    "geneticist": "atom", "research_scientist": "microscope", "laboratory_scientist": "flask-outline",
-    "doctor": "medical-bag", "physician": "medical-bag", "surgeon": "medical-bag", "nurse": "medical-bag",
-    "pharmacist": "pill", "dentist": "tooth-outline", "psychologist": "account-heart-outline",
-    "civil_engineer": "office-building", "mechanical_engineer": "cog-outline", "electrical_engineer": "flash-outline",
-    "electronics_engineer": "cog-outline", "chemical_engineer": "flask-outline", "structural_engineer": "office-building",
-    "software_engineer": "code-tags", "frontend_developer": "code-tags", "backend_developer": "server-outline",
-    "fullstack_developer": "code-tags", "mobile_developer": "cellphone", "web_developer": "web",
-    "devops_engineer": "infinity", "cloud_engineer": "cloud-outline", "data_engineer": "database-outline",
-    "data_scientist": "chart-line", "ai_ml_engineer": "brain", "cybersecurity_specialist": "shield-lock-outline",
-    "network_engineer": "lan-connect", "database_administrator": "database", "qa_engineer": "bug-check-outline",
-    "teacher": "school-outline", "lecturer": "school-outline", "professor": "school-outline", "tutor": "school-outline",
-    "entrepreneur": "lightbulb-outline", "founder": "rocket-launch-outline", "ceo": "briefcase-outline",
-    "accountant": "calculator", "auditor": "clipboard-check-outline", "financial_analyst": "chart-line",
-    "economist": "chart-line", "banker": "bank-outline", "lawyer": "scale-balance", "advocate": "scale-balance",
-    "journalist": "newspaper-variant-outline", "writer": "pencil-outline", "author": "book-open-outline", "poet": "format-quote-close",
-    "photographer": "camera-outline", "filmmaker": "movie-open-outline", "graphic_designer": "palette-outline", "artist": "palette-outline",
-    "architect": "ruler-square", "farmer": "sprout-outline", "agronomist": "sprout-outline", "horticulturist": "flower-outline",
-    "veterinarian": "paw-outline", "food_scientist": "food-apple-outline", "chef": "silverware-fork-knife", "pilot": "airplane",
-    "aviation_specialist": "airplane", "seafarer": "ferry", "marine_engineer": "ferry", "athlete": "run", "coach": "bullhorn-outline",
-    "environmental_consultant": "leaf", "sustainability_specialist": "leaf", "conservationist": "tree-outline",
-    "security_specialist": "shield-outline", "security_analyst": "shield-outline", "safety_officer": "hard-hat",
-    "clergy": "church-outline", "faith_worker": "church-outline", "social_worker": "account-heart-outline",
+    "physicist": "atom",
+    "mathematician": "function",
+    "statistician": "function",
+    "chemist": "flask-outline",
+    "biologist": "microscope",
+    "microbiologist": "microscope",
+    "geneticist": "atom",
+    "research_scientist": "microscope",
+    "laboratory_scientist": "flask-outline",
+    "doctor": "medical-bag",
+    "physician": "medical-bag",
+    "surgeon": "medical-bag",
+    "nurse": "medical-bag",
+    "pharmacist": "pill",
+    "dentist": "tooth-outline",
+    "psychologist": "account-heart-outline",
+    "civil_engineer": "office-building",
+    "mechanical_engineer": "cog-outline",
+    "electrical_engineer": "flash-outline",
+    "electronics_engineer": "cog-outline",
+    "chemical_engineer": "flask-outline",
+    "structural_engineer": "office-building",
+    "software_engineer": "code-tags",
+    "frontend_developer": "code-tags",
+    "backend_developer": "server-outline",
+    "fullstack_developer": "code-tags",
+    "mobile_developer": "cellphone",
+    "web_developer": "web",
+    "devops_engineer": "infinity",
+    "cloud_engineer": "cloud-outline",
+    "data_engineer": "database-outline",
+    "data_scientist": "chart-line",
+    "ai_ml_engineer": "brain",
+    "cybersecurity_specialist": "shield-lock-outline",
+    "network_engineer": "lan-connect",
+    "database_administrator": "database",
+    "qa_engineer": "bug-check-outline",
+    "teacher": "school-outline",
+    "lecturer": "school-outline",
+    "professor": "school-outline",
+    "tutor": "school-outline",
+    "entrepreneur": "lightbulb-outline",
+    "founder": "rocket-launch-outline",
+    "ceo": "briefcase-outline",
+    "accountant": "calculator",
+    "auditor": "clipboard-check-outline",
+    "financial_analyst": "chart-line",
+    "economist": "chart-line",
+    "banker": "bank-outline",
+    "lawyer": "scale-balance",
+    "advocate": "scale-balance",
+    "journalist": "newspaper-variant-outline",
+    "writer": "pencil-outline",
+    "author": "book-open-outline",
+    "poet": "format-quote-close",
+    "photographer": "camera-outline",
+    "filmmaker": "movie-open-outline",
+    "graphic_designer": "palette-outline",
+    "artist": "palette-outline",
+    "architect": "ruler-square",
+    "farmer": "sprout-outline",
+    "agronomist": "sprout-outline",
+    "horticulturist": "flower-outline",
+    "veterinarian": "paw-outline",
+    "food_scientist": "food-apple-outline",
+    "chef": "silverware-fork-knife",
+    "pilot": "airplane",
+    "aviation_specialist": "airplane",
+    "seafarer": "ferry",
+    "marine_engineer": "ferry",
+    "athlete": "run",
+    "coach": "bullhorn-outline",
+    "environmental_consultant": "leaf",
+    "sustainability_specialist": "leaf",
+    "conservationist": "tree-outline",
+    "security_specialist": "shield-outline",
+    "security_analyst": "shield-outline",
+    "safety_officer": "hard-hat",
+    "clergy": "church-outline",
+    "faith_worker": "church-outline",
+    "social_worker": "account-heart-outline",
 }
 
 ROLES: list[dict[str, str]] = [
-    {"code": code, "label": label, "industry_code": industry, "icon": ICON_BY_ROLE.get(code, "briefcase-outline")}
+    {
+        "code": code,
+        "label": label,
+        "industry_code": industry,
+        "icon": ICON_BY_ROLE.get(code, "briefcase-outline"),
+    }
     for code, label, industry in _ROLES
 ]
 
@@ -293,7 +359,9 @@ INDUSTRY_CODES = {item["code"] for item in INDUSTRIES}
 ROLE_MAP = {item["code"]: item for item in ROLES}
 
 
-def validate_identity_selection(industry_codes: list[str], role_codes: list[str], primary_role: str | None) -> None:
+def validate_identity_selection(
+    industry_codes: list[str], role_codes: list[str], primary_role: str | None
+) -> None:
     unknown_industries = sorted(set(industry_codes) - INDUSTRY_CODES)
     unknown_roles = sorted(set(role_codes) - ROLE_MAP.keys())
     if unknown_industries:
@@ -301,4 +369,6 @@ def validate_identity_selection(industry_codes: list[str], role_codes: list[str]
     if unknown_roles:
         raise ValueError(f"Unknown professional roles: {', '.join(unknown_roles)}")
     if primary_role is not None and primary_role not in role_codes:
-        raise ValueError("Primary professional role must be one of the selected professional roles.")
+        raise ValueError(
+            "Primary professional role must be one of the selected professional roles."
+        )
