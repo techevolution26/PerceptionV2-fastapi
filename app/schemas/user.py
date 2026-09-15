@@ -23,6 +23,7 @@ class UserPublic(BaseModel):
     primary_professional_role_label: str | None = None
     professional_role_labels: list[str] = Field(default_factory=list)
     verified_professional_roles: list[str] = Field(default_factory=list)
+    location_label: str | None = None
     created_at: datetime
 
 
@@ -50,6 +51,7 @@ class UserMe(UserPublic):
     primary_analytics_topic_id: int | None = None
     notification_preferences: dict[str, bool] = Field(default_factory=dict)
     privacy_preferences: dict[str, str | bool] = Field(default_factory=dict)
+    location_visibility: str = "private"
 
 
 class UserSlim(BaseModel):
@@ -127,6 +129,7 @@ class UpdateMeRequest(BaseModel):
     professional_industries: list[str] | None = Field(default=None, max_length=20)
     professional_roles: list[str] | None = Field(default=None, max_length=20)
     primary_professional_role: str | None = Field(default=None, max_length=128)
+    location_visibility: str | None = Field(default=None, pattern="^(private|country|region)$")
 
 
 class ForgotPasswordRequest(BaseModel):

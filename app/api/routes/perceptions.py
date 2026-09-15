@@ -9,6 +9,7 @@ from app.models.models import Perception, Topic, User
 from app.schemas.content import PerceptionOut
 from app.services.perception_serialization import bulk_to_out, to_out
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
+from app.services.personalization import get_personalized_perceptions
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -33,6 +34,15 @@ async def list_perceptions(db: DbSession, viewer: OptionalUser, topic_id: int | 
     result = await db.execute(query)
     perceptions = result.scalars().all()
     return await bulk_to_out(db, list(perceptions), viewer.id if viewer else None)
+
+
+@router.get("/perceptions/personalized", response_model=list[PerceptionOut])
+async def personalized_perceptions(
+    current_user: CurrentUser,
+    db: DbSession,
+):
+    perceptions = await get_personalized_perceptions(db, current_user)
+    return await bulk_to_out(db, perceptions, current_user.id)
 
 
 @router.post("/perceptions", response_model=PerceptionOut, status_code=status.HTTP_201_CREATED)

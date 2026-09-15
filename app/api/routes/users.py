@@ -38,6 +38,18 @@ from app.services.professional_taxonomy import (
 router = APIRouter(tags=["users"])
 
 
+def _public_location_label(user: User) -> str | None:
+    """Return only the explicitly permitted, user-provided location context."""
+    visibility = str((user.privacy_preferences or {}).get("location_visibility", "private"))
+    country = (user.country_code or "").strip().upper()
+    region = (user.region or "").strip()
+    if visibility == "region" and country and region:
+        return f"{country} · {region}"
+    if visibility in {"country", "region"} and country:
+        return country
+    return None
+
+
 async def _profile_counts(db: DbSession, user_id: int) -> dict[str, int]:
     perceptions_count = (
         await db.execute(
@@ -102,10 +114,14 @@ async def update_preferences(
             **payload.notification_preferences,
         }
     if payload.privacy_preferences is not None:
-        current_user.privacy_preferences = {
-            **dict(current_user.privacy_preferences or {}),
-            **payload.privacy_preferences,
-        }
+        preferences = dict(current_user.privacy_preferences or {})
+        incoming = dict(payload.privacy_preferences)
+        if "location_visibility" in incoming:
+            visibility = incoming["location_visibility"]
+            if visibility not in {"private", "country", "region"}:
+                raise HTTPException(status_code=422, detail="Invalid location visibility.")
+        preferences.update(incoming)
+        current_user.privacy_preferences = preferences
     await db.commit()
     await db.refresh(current_user)
     return current_user
@@ -146,6 +162,16 @@ async def update_me(payload: UpdateMeRequest, current_user: CurrentUser, db: DbS
         current_user.name = payload.name
     if payload.bio is not None:
         current_user.bio = payload.bio
+    if "country_code" in payload.model_fields_set:
+        current_user.country_code = payload.country_code.upper() if payload.country_code else None
+    if "region" in payload.model_fields_set:
+        current_user.region = payload.region.strip() if payload.region else None
+    if "city" in payload.model_fields_set:
+        current_user.city = payload.city.strip() if payload.city else None
+    if payload.location_visibility is not None:
+        preferences = dict(current_user.privacy_preferences or {})
+        preferences["location_visibility"] = payload.location_visibility
+        current_user.privacy_preferences = preferences
     await db.commit()
     await db.refresh(current_user)
     return current_user
@@ -314,6 +340,7 @@ async def get_user_profile(user_id: int, db: DbSession, viewer: OptionalUser):
         primary_professional_role_label=user.primary_professional_role_label,
         professional_role_labels=user.professional_role_labels,
         verified_professional_roles=list(user.verified_professional_roles or []),
+        location_label=_public_location_label(user),
         created_at=user.created_at,
         is_following=following,
         can_message=can_message,

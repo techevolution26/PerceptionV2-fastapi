@@ -91,6 +91,11 @@ class User(TimestampMixin, Base):
     )
 
     @property
+    def location_visibility(self) -> str:
+        value = (self.privacy_preferences or {}).get("location_visibility", "private")
+        return value if value in {"private", "country", "region"} else "private"
+
+    @property
     def primary_professional_industry(self) -> str | None:
         if not self.primary_professional_role:
             return None
