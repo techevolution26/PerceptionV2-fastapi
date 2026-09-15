@@ -43,6 +43,7 @@ class PerceptionOut(BaseModel):
     likes_count: int = 0
     comments_count: int = 0
     liked_by_user: bool = False
+    saved_by_user: bool = False
 
 
 class CommentOut(BaseModel):

@@ -193,6 +193,27 @@ class Like(TimestampMixin, Base):
     perception: Mapped["Perception"] = relationship(back_populates="likes")
 
 
+class SavedPerception(TimestampMixin, Base):
+    __tablename__ = "saved_perceptions"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "perception_id", name="uq_saved_perception_user_perception"
+        ),
+        Index("ix_saved_perceptions_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    perception_id: Mapped[int] = mapped_column(
+        ForeignKey("perceptions.id", ondelete="CASCADE"), index=True
+    )
+
+    user: Mapped["User"] = relationship()
+    perception: Mapped["Perception"] = relationship()
+
+
 class Comment(TimestampMixin, Base):
     __tablename__ = "comments"
 
@@ -375,6 +396,42 @@ class ConversationState(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class PerceptionReport(Base):
+    __tablename__ = "perception_reports"
+    __table_args__ = (
+        UniqueConstraint(
+            "reporter_user_id", "perception_id",
+            name="uq_perception_report_reporter_perception",
+        ),
+        Index("ix_perception_reports_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reporter_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    perception_id: Mapped[int] = mapped_column(
+        ForeignKey("perceptions.id", ondelete="CASCADE"), index=True
+    )
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    details: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    reviewed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolution_note: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
 
 
 class AdminAuditLog(Base):

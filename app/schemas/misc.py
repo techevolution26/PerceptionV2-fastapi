@@ -46,6 +46,10 @@ class LikeToggleOut(BaseModel):
     likes_count: int
 
 
+class SaveToggleOut(BaseModel):
+    saved: bool
+
+
 class FollowToggleOut(BaseModel):
     followed: bool | None = None
     message: str | None = None

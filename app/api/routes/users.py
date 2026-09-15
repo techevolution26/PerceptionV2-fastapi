@@ -27,6 +27,7 @@ from app.schemas.user import (
 from app.services.storage import ALLOWED_IMAGE_TYPES, save_upload
 from app.services.subscriptions import require_analytics_access
 from app.services.notifications import notify
+from app.services.perception_serialization import bulk_to_out
 from app.services.professional_taxonomy import (
     INDUSTRIES,
     ROLES,
@@ -314,7 +315,9 @@ async def get_user_profile(user_id: int, db: DbSession, viewer: OptionalUser):
 
 
 @router.get("/users/{user_id}/perceptions", response_model=list[PerceptionOut])
-async def get_user_perceptions(user_id: int, db: DbSession):
+async def get_user_perceptions(
+    user_id: int, db: DbSession, viewer: OptionalUser
+):
     exists = await db.execute(
         select(User.id).where(User.id == user_id, User.is_active.is_(True))
     )
@@ -329,32 +332,8 @@ async def get_user_perceptions(user_id: int, db: DbSession):
         .options(selectinload(Perception.user), selectinload(Perception.topic))
         .order_by(Perception.created_at.desc())
     )
-    perceptions = result.scalars().all()
-
-    out = []
-    for p in perceptions:
-        likes_count = (
-            await db.execute(
-                select(func.count()).select_from(Like).where(Like.perception_id == p.id)
-            )
-        ).scalar_one()
-        comments_count = (
-            await db.execute(
-                select(func.count())
-                .select_from(Comment)
-                .where(Comment.perception_id == p.id)
-            )
-        ).scalar_one()
-        out.append(
-            PerceptionOut(
-                **PerceptionOut.model_validate(p).model_dump(
-                    exclude={"likes_count", "comments_count"}
-                ),
-                likes_count=likes_count,
-                comments_count=comments_count,
-            )
-        )
-    return out
+    perceptions = list(result.scalars().all())
+    return await bulk_to_out(db, perceptions, viewer.id if viewer else None)
 
 
 @router.get("/users/{user_id}/topics", response_model=list[TopicOut])

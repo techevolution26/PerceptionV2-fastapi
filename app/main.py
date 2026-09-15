@@ -20,7 +20,9 @@ from app.api.routes import (
     likes,
     notifications,
     perceptions,
+    reports,
     search,
+    saved_perceptions,
     topics,
     users,
 )
@@ -98,6 +100,8 @@ for router in (
     users,
     topics,
     perceptions,
+    reports,
+    saved_perceptions,
     likes,
     comments,
     conversations,

@@ -2,7 +2,7 @@
 from sqlalchemy import func, select, inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Comment, Like, Perception
+from app.models.models import Comment, Like, Perception, SavedPerception
 from app.schemas.content import PerceptionOut
 
 
@@ -45,22 +45,31 @@ async def to_out(db: AsyncSession, perception: Perception, viewer_id: int | None
     ).scalar_one()
 
     liked_by_user = False
+    saved_by_user = False
     if viewer_id is not None:
         liked = await db.execute(
             select(Like.id).where(Like.perception_id == perception.id, Like.user_id == viewer_id)
         )
         liked_by_user = liked.scalar_one_or_none() is not None
+        saved = await db.execute(
+            select(SavedPerception.id).where(
+                SavedPerception.perception_id == perception.id,
+                SavedPerception.user_id == viewer_id,
+            )
+        )
+        saved_by_user = saved.scalar_one_or_none() is not None
 
     # Process via safe relationship dictionary inspector
     safe_data = _to_safe_dict(perception)
     
     return PerceptionOut(
         **PerceptionOut.model_validate(safe_data).model_dump(
-            exclude={"likes_count", "comments_count", "liked_by_user"}
+            exclude={"likes_count", "comments_count", "liked_by_user", "saved_by_user"}
         ),
         likes_count=likes_count,
         comments_count=comments_count,
         liked_by_user=liked_by_user,
+        saved_by_user=saved_by_user,
     )
 
 
@@ -86,11 +95,19 @@ async def bulk_to_out(db: AsyncSession, perceptions: list[Perception], viewer_id
     comments_map = dict(comments_rows)
 
     liked_ids: set[int] = set()
+    saved_ids: set[int] = set()
     if viewer_id is not None:
         liked_rows = await db.execute(
             select(Like.perception_id).where(Like.perception_id.in_(ids), Like.user_id == viewer_id)
         )
         liked_ids = {row[0] for row in liked_rows.all()}
+        saved_rows = await db.execute(
+            select(SavedPerception.perception_id).where(
+                SavedPerception.perception_id.in_(ids),
+                SavedPerception.user_id == viewer_id,
+            )
+        )
+        saved_ids = {row[0] for row in saved_rows.all()}
 
     out = []
     for p in perceptions:
@@ -99,11 +116,12 @@ async def bulk_to_out(db: AsyncSession, perceptions: list[Perception], viewer_id
         out.append(
             PerceptionOut(
                 **PerceptionOut.model_validate(safe_data).model_dump(
-                    exclude={"likes_count", "comments_count", "liked_by_user"}
+                    exclude={"likes_count", "comments_count", "liked_by_user", "saved_by_user"}
                 ),
                 likes_count=likes_map.get(p.id, 0),
                 comments_count=comments_map.get(p.id, 0),
                 liked_by_user=p.id in liked_ids,
+                saved_by_user=p.id in saved_ids,
             )
         )
     return out
