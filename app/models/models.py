@@ -91,6 +91,15 @@ class User(TimestampMixin, Base):
     )
 
     @property
+    def primary_professional_industry(self) -> str | None:
+        if not self.primary_professional_role:
+            return None
+        from app.services.professional_taxonomy import ROLE_MAP
+
+        role = ROLE_MAP.get(self.primary_professional_role)
+        return role["industry_code"] if role else None
+
+    @property
     def primary_professional_role_label(self) -> str | None:
         if not self.primary_professional_role:
             return None

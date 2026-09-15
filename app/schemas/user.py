@@ -19,6 +19,7 @@ class UserPublic(BaseModel):
     professional_industries: list[str] = Field(default_factory=list)
     professional_roles: list[str] = Field(default_factory=list)
     primary_professional_role: str | None = None
+    primary_professional_industry: str | None = None
     primary_professional_role_label: str | None = None
     professional_role_labels: list[str] = Field(default_factory=list)
     verified_professional_roles: list[str] = Field(default_factory=list)
@@ -65,6 +66,7 @@ class UserSlim(BaseModel):
     professional_industries: list[str] = Field(default_factory=list)
     professional_roles: list[str] = Field(default_factory=list)
     primary_professional_role: str | None = None
+    primary_professional_industry: str | None = None
     primary_professional_role_label: str | None = None
     professional_role_labels: list[str] = Field(default_factory=list)
     verified_professional_roles: list[str] = Field(default_factory=list)
