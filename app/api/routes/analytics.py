@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy.orm import selectinload
 from sqlalchemy import distinct, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.models import (
@@ -160,26 +161,30 @@ async def record_interaction(
         raise HTTPException(status_code=404, detail="Perception not found")
 
     day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    duplicate = await db.execute(
-        select(PerceptionInteraction.id).where(
-            PerceptionInteraction.actor_user_id == current_user.id,
-            PerceptionInteraction.perception_id == payload.perception_id,
-            PerceptionInteraction.event_type == event_type,
-            PerceptionInteraction.occurred_on == day,
+    statement = (
+        pg_insert(PerceptionInteraction)
+        .values(
+            actor_user_id=current_user.id,
+            perception_id=payload.perception_id,
+            event_type=event_type,
+            occurred_on=day,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[
+                PerceptionInteraction.actor_user_id,
+                PerceptionInteraction.perception_id,
+                PerceptionInteraction.event_type,
+                PerceptionInteraction.occurred_on,
+            ]
         )
     )
-    if duplicate.scalar_one_or_none() is None:
-        db.add(
-            PerceptionInteraction(
-                actor_user_id=current_user.id,
-                perception_id=payload.perception_id,
-                event_type=event_type,
-                occurred_on=day,
-            )
-        )
-        await db.commit()
+    result = await db.execute(statement)
+    await db.commit()
 
-    return {"recorded": True, "event_type": event_type}
+    return {
+        "recorded": result.rowcount == 1,
+        "event_type": event_type,
+    }
 
 
 @router.get("/overview", response_model=AnalyticsOverviewOut)
