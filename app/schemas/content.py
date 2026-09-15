@@ -14,6 +14,8 @@ class TopicOut(BaseModel):
     name: str
     description: str | None = None
     image_url: str | None = None
+    followers_count: int = 0
+    followed_by_user: bool = False
 
 
 class TopicSlim(BaseModel):

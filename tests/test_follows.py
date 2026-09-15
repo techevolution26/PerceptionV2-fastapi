@@ -1,6 +1,8 @@
 # tests/test_follows.py
 import pytest
 
+from app.models.models import Topic
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -59,3 +61,29 @@ async def test_profile_includes_topics_count(client):
     body = res.json()
     assert "topics_count" in body
     assert body["topics_count"] == 0
+
+
+async def test_topic_follow_is_idempotent_and_topic_exposes_public_count_and_state(client, db_session):
+    token, _ = await _register(client, "Ada", "ada-topic@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Create the topic through the test database because topic creation is
+    # intentionally outside the public API surface.
+    async with db_session() as session:
+        topic = Topic(name="Climate", description="Climate perspectives")
+        session.add(topic)
+        await session.commit()
+        await session.refresh(topic)
+        topic_id = topic.id
+
+    first = await client.post(f"/api/topics/{topic_id}/follow", headers=headers)
+    second = await client.post(f"/api/topics/{topic_id}/follow", headers=headers)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["followed"] is True
+    assert second.json()["followed"] is True
+
+    detail = await client.get(f"/api/topics/{topic_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["followers_count"] == 1
+    assert detail.json()["followed_by_user"] is True
