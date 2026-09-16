@@ -42,6 +42,7 @@ from app.services.perception_intelligence import (
     orchestrate_perception_intelligence,
 )
 from app.services.decision_intelligence import build_decision_intelligence
+from app.services.investigation_paths import build_investigation_paths
 from app.schemas.perception_intelligence import PerceptionIntelligence
 from app.services.temporal_intelligence import build_temporal_intelligence
 from app.services.profile_intelligence import (
@@ -1119,6 +1120,12 @@ async def perception_analytics(
             temporal={"changes": temporal["changes"]},
             minimum=MINIMUM_SAMPLE,
         )
+        investigation_paths = build_investigation_paths(
+            intent=decision_intent,
+            observations=decision.get("observations", []),
+            minimum=MINIMUM_SAMPLE,
+        )
+        decision = {**decision, "investigation_paths": investigation_paths}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1133,6 +1140,7 @@ async def perception_analytics(
             ),
             "summary": "A limited view of the strongest evidence-backed observation is available on the free plan.",
             "observations": decision.get("observations", [])[:1],
+            "investigation_paths": decision.get("investigation_paths", [])[:1],
             "considerations": [],
             "guardrail": decision.get("guardrail"),
             "limitations": [

@@ -654,3 +654,39 @@ class PerceptionModeration(Base):
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     review_note: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+
+class InvestigationThread(TimestampMixin, Base):
+    """Private user workspace entry for an investigation path.
+
+    This stores a user's chosen question and its originating Perception trace;
+    it does not create or modify evidence.
+    """
+
+    __tablename__ = "investigation_threads"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "perception_id", "question",
+            name="uq_investigation_thread_user_perception_question",
+        ),
+        Index("ix_investigation_threads_user_updated", "user_id", "updated_at"),
+        Index("ix_investigation_threads_perception", "perception_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    perception_id: Mapped[int] = mapped_column(
+        ForeignKey("perceptions.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    question: Mapped[str] = mapped_column(String(2000), nullable=False)
+    rationale: Mapped[str] = mapped_column(String(2000), nullable=False)
+    evidence_basis: Mapped[str] = mapped_column(String(1000), nullable=False)
+    validation_step: Mapped[str] = mapped_column(String(2000), nullable=False)
+    evidence_trace_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    user: Mapped["User"] = relationship()
+    perception: Mapped["Perception"] = relationship()

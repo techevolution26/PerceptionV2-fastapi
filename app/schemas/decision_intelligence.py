@@ -26,11 +26,20 @@ class DecisionConsideration(BaseModel):
     description: str
 
 
+class InvestigationPath(BaseModel):
+    title: str
+    question: str
+    rationale: str
+    evidence_basis: str
+    validation_step: str
+
+
 class DecisionIntelligence(BaseModel):
     intent: DecisionIntent
     status: Literal["available", "insufficient_sample"]
     summary: str
     observations: list[DecisionObservation] = Field(default_factory=list)
+    investigation_paths: list[InvestigationPath] = Field(default_factory=list)
     considerations: list[DecisionConsideration] = Field(default_factory=list)
     evidence_invariant: bool
     guardrail: str

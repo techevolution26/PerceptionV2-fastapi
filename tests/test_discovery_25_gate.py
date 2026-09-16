@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.services.personalization import score_perception
 from app.services.privacy_contract_guard import (
     creator_discoverability_allowed,
     intelligence_participation_allowed,
@@ -32,3 +31,7 @@ def test_privacy_controls_can_disable_derived_surfaces():
     user = RestrictedUser()
     assert intelligence_participation_allowed(user) is False
     assert creator_discoverability_allowed(user) is False
+
+
+def test_perception_intelligence_experience_document_exists():
+    assert Path("docs/DISCOVERY_26_PERCEPTION_INTELLIGENCE_EXPERIENCE.md").is_file()
