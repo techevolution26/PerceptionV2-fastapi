@@ -3,7 +3,7 @@ from sqlalchemy import case, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession, OptionalUser
-from app.models.models import Follow, Perception, Topic, User
+from app.models.models import Follow, Perception, PerceptionModeration, Topic, User
 from app.schemas.content import PerceptionOut
 from app.schemas.user import UserSlim
 from app.services.perception_serialization import bulk_to_out
@@ -51,8 +51,11 @@ async def search(
         select(Perception)
         .join(User, User.id == Perception.user_id)
         .outerjoin(Topic, Topic.id == Perception.topic_id)
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
         .where(
             User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
             or_(
                 Perception.body.ilike(like),
                 Topic.name.ilike(like),

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.models import Follow, Perception, Topic, TopicFollow, User
+from app.models.models import Follow, Perception, PerceptionModeration, Topic, TopicFollow, User
 from app.schemas.recommendations import (
     CreatorRecommendation,
     PerceptionRecommendation,
@@ -58,7 +58,12 @@ async def get_recommendations(
     result = await db.execute(
         select(Perception)
         .join(User, User.id == Perception.user_id)
-        .where(User.is_active.is_(True))
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
+        .where(
+            User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
+        )
         .options(selectinload(Perception.user), selectinload(Perception.topic))
         .order_by(Perception.created_at.desc())
         .limit(300)

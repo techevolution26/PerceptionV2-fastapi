@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.models import Comment, Follow, Like, Perception, SavedPerception, TopicFollow, User
+from app.models.models import Comment, Follow, Like, Perception, SavedPerception, PerceptionModeration, TopicFollow, User
 
 
 @dataclass(frozen=True)
@@ -149,7 +149,12 @@ async def get_personalized_perceptions(
     result = await db.execute(
         select(Perception)
         .join(User, User.id == Perception.user_id)
-        .where(User.is_active.is_(True))
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
+        .where(
+            User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
+        )
         .options(selectinload(Perception.user), selectinload(Perception.topic))
         .order_by(Perception.created_at.desc())
         .limit(candidate_limit)

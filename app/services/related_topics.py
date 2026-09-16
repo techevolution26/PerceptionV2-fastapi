@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Comment, CommentIntelligence, Perception, Topic, TopicFollow, User
+from app.models.models import Comment, CommentIntelligence, Perception, PerceptionModeration, Topic, TopicFollow, User
 from app.schemas.related_topics import RelatedTopic, RelatedTopicsOut
 from app.services.personalization import build_personalization_profile
 
@@ -55,9 +55,12 @@ async def _topic_participants(
     result = await db.execute(
         select(Perception.topic_id, Perception.user_id)
         .join(User, User.id == Perception.user_id)
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
         .where(
             Perception.topic_id.in_(topic_ids),
             User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
         )
         .distinct()
     )
@@ -76,10 +79,13 @@ async def _topic_roles(
     result = await db.execute(
         select(Perception.topic_id, User.primary_professional_role)
         .join(User, User.id == Perception.user_id)
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
         .where(
             Perception.topic_id.in_(topic_ids),
             User.is_active.is_(True),
             User.primary_professional_role.is_not(None),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
         )
         .distinct()
     )
@@ -102,6 +108,8 @@ async def _topic_semantics(
         .where(
             Perception.topic_id.in_(topic_ids),
             CommentIntelligence.status == "analyzed",
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
         )
     )
     rows_by_topic: dict[int, list[CommentIntelligence]] = defaultdict(list)
@@ -140,9 +148,12 @@ async def get_related_topics(
         select(Topic)
         .join(Perception, Perception.topic_id == Topic.id)
         .join(User, User.id == Perception.user_id)
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
         .where(
             Topic.id != topic_id,
             User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
         )
         .group_by(Topic.id)
         .order_by(func.max(Perception.created_at).desc())
@@ -174,7 +185,12 @@ async def get_related_topics(
     now = datetime.now(timezone.utc)
     latest_result = await db.execute(
         select(Perception.topic_id, func.max(Perception.created_at))
-        .where(Perception.topic_id.in_([topic.id for topic in candidates]))
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
+        .where(
+            Perception.topic_id.in_([topic.id for topic in candidates]),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
+        )
         .group_by(Perception.topic_id)
     )
     latest_by_topic = {topic_id: latest for topic_id, latest in latest_result.all() if topic_id is not None}

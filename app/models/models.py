@@ -629,3 +629,28 @@ class PerceptionInteraction(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class PerceptionModeration(Base):
+    """Machine-generated intake assessment; it never decides truth or harm."""
+
+    __tablename__ = "perception_moderation"
+    __table_args__ = (
+        Index("ix_perception_moderation_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    perception_id: Mapped[int] = mapped_column(
+        ForeignKey("perceptions.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="published")
+    risk_level: Mapped[str] = mapped_column(String(32), nullable=False, default="none")
+    flags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    reviewed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(String(2000), nullable=True)

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.models import Comment, CommentIntelligence, Perception, User
+from app.models.models import Comment, CommentIntelligence, Perception, PerceptionModeration, User
 from app.schemas.related_perceptions import RelatedPerception, RelatedPerceptionsOut
 from app.services.perception_serialization import bulk_to_out
 
@@ -59,7 +59,13 @@ async def get_related_perceptions(
     source_result = await db.execute(
         select(Perception)
         .join(User, User.id == Perception.user_id)
-        .where(Perception.id == perception_id, User.is_active.is_(True))
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
+        .where(
+            Perception.id == perception_id,
+            User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
+        )
         .options(selectinload(Perception.user), selectinload(Perception.topic))
     )
     source = source_result.scalar_one_or_none()
@@ -81,9 +87,12 @@ async def get_related_perceptions(
     candidate_result = await db.execute(
         select(Perception)
         .join(User, User.id == Perception.user_id)
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
         .where(
             Perception.id != perception_id,
             User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
         )
         .options(selectinload(Perception.user), selectinload(Perception.topic))
         .order_by(Perception.created_at.desc())

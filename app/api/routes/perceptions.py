@@ -1,17 +1,20 @@
 # app/api/routes/perceptions.py
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.core.config import get_settings
 from app.api.deps import CurrentUser, DbSession, OptionalUser
-from app.models.models import Perception, Topic, User
+from app.models.models import Perception, PerceptionModeration, Topic, User
 from app.schemas.content import PerceptionOut
+from app.schemas.perception_moderation import PerceptionPendingReviewOut
 from app.schemas.related_perceptions import RelatedPerceptionsOut
 from app.services.perception_serialization import bulk_to_out, to_out
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
 from app.services.personalization import get_personalized_perceptions
 from app.services.related_perceptions import get_related_perceptions
+from app.services.perception_moderation import assess_perception
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -26,7 +29,12 @@ async def list_perceptions(db: DbSession, viewer: OptionalUser, topic_id: int | 
     query = (
         select(Perception)
         .join(User, User.id == Perception.user_id)
-        .where(User.is_active.is_(True))
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
+        .where(
+            User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
+        )
         .options(selectinload(Perception.user), selectinload(Perception.topic))
         .order_by(Perception.created_at.desc())
     )
@@ -47,7 +55,7 @@ async def personalized_perceptions(
     return await bulk_to_out(db, perceptions, current_user.id)
 
 
-@router.post("/perceptions", response_model=PerceptionOut, status_code=status.HTTP_201_CREATED)
+@router.post("/perceptions", response_model=PerceptionOut | PerceptionPendingReviewOut, status_code=status.HTTP_201_CREATED)
 async def create_perception(
     current_user: CurrentUser,
     db: DbSession,
@@ -63,11 +71,28 @@ async def create_perception(
     if media is not None:
         media_url = await save_upload(media, "perceptions", allowed_types=ALLOWED_MEDIA_TYPES)
 
-    perception = Perception(user_id=current_user.id, topic_id=topic_id, body=body, media_url=media_url)
+    perception = Perception(user_id=current_user.id, topic_id=topic_id, body=body.strip(), media_url=media_url)
     db.add(perception)
-    await db.commit()
-    await db.refresh(perception, attribute_names=["user", "topic"])
+    await db.flush()
 
+    assessment = assess_perception(perception.body)
+    db.add(
+        PerceptionModeration(
+            perception_id=perception.id,
+            status=assessment.status,
+            risk_level=assessment.risk_level,
+            flags=assessment.flags,
+        )
+    )
+    await db.commit()
+
+    if assessment.status == "pending_review":
+        return PerceptionPendingReviewOut(
+            perception_id=perception.id,
+            message="Your perception was received and sent for a quick review before it appears publicly.",
+        )
+
+    await db.refresh(perception, attribute_names=["user", "topic"])
     return await to_out(db, perception, current_user.id)
 
 
@@ -90,7 +115,13 @@ async def get_perception(perception_id: int, db: DbSession, viewer: OptionalUser
     result = await db.execute(
         select(Perception)
         .join(User, User.id == Perception.user_id)
-        .where(Perception.id == perception_id, User.is_active.is_(True))
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
+        .where(
+            Perception.id == perception_id,
+            User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
+        )
         .options(selectinload(Perception.user), selectinload(Perception.topic))
     )
     perception = result.scalar_one_or_none()
@@ -105,7 +136,13 @@ async def perceptions_by_topic(topic_id: int, db: DbSession, viewer: OptionalUse
     result = await db.execute(
         select(Perception)
         .join(User, User.id == Perception.user_id)
-        .where(Perception.topic_id == topic_id, User.is_active.is_(True))
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
+        .where(
+            Perception.topic_id == topic_id,
+            User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
+        )
         .options(selectinload(Perception.user), selectinload(Perception.topic))
         .order_by(Perception.created_at.desc())
     )
@@ -173,6 +210,21 @@ async def update_perception(
             except Exception as e:
                 # Log the error but don't crash the request—updating the DB record takes priority
                 print(f"Failed to delete orphaned file {old_media_url}: {e}")
+
+    moderation = await db.scalar(
+        select(PerceptionModeration).where(PerceptionModeration.perception_id == perception.id)
+    )
+    assessment = assess_perception(perception.body)
+    if moderation is None:
+        moderation = PerceptionModeration(perception_id=perception.id)
+        db.add(moderation)
+    moderation.status = assessment.status
+    moderation.risk_level = assessment.risk_level
+    moderation.flags = assessment.flags
+    moderation.checked_at = datetime.now(timezone.utc)
+    moderation.reviewed_by_user_id = None
+    moderation.reviewed_at = None
+    moderation.review_note = None
 
     await db.commit()
     

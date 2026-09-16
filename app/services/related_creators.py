@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Comment, CommentIntelligence, Follow, Perception, Topic, User
+from app.models.models import Comment, CommentIntelligence, Follow, Perception, PerceptionModeration, Topic, User
 from app.schemas.related_creators import RelatedCreator, RelatedCreatorsOut
 from app.services.personalization import build_personalization_profile
 
@@ -75,9 +75,12 @@ async def _source_semantics(
         select(Comment.user_id, CommentIntelligence)
         .join(CommentIntelligence, Comment.id == CommentIntelligence.comment_id)
         .join(Perception, Perception.id == Comment.perception_id)
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
         .where(
             Perception.topic_id == topic_id,
             CommentIntelligence.status == "analyzed",
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
         )
     )
     rows: list[CommentIntelligence] = []
@@ -103,6 +106,8 @@ async def _creator_semantics(
         .where(
             Perception.user_id.in_(user_ids),
             CommentIntelligence.status == "analyzed",
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
         )
     )
     rows_by_creator: dict[int, list[CommentIntelligence]] = defaultdict(list)
@@ -163,7 +168,12 @@ async def get_related_creators(
     candidate_result = await db.execute(
         select(User, Perception.created_at)
         .join(Perception, Perception.user_id == User.id)
-        .where(User.is_active.is_(True))
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
+        .where(
+            User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
+        )
         .order_by(Perception.created_at.desc())
         .limit(CANDIDATE_LIMIT)
     )
@@ -174,7 +184,13 @@ async def get_related_creators(
     source_result = await db.execute(
         select(User)
         .join(Perception, Perception.user_id == User.id)
-        .where(Perception.topic_id == topic_id, User.is_active.is_(True))
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
+        .where(
+            Perception.topic_id == topic_id,
+            User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
+        )
         .distinct()
     )
     source_users = list(source_result.scalars().all())
@@ -192,7 +208,13 @@ async def get_related_creators(
     candidate_ids = list(candidate_users)
     source_creator_dates = await db.execute(
         select(Perception.user_id, func.max(Perception.created_at))
-        .where(Perception.topic_id == topic_id, Perception.user_id.in_(candidate_ids))
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
+        .where(
+            Perception.topic_id == topic_id,
+            Perception.user_id.in_(candidate_ids),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
+        )
         .group_by(Perception.user_id)
     )
     for creator_id, created_at in source_creator_dates.all():
@@ -205,9 +227,12 @@ async def get_related_creators(
     source_roles_result = await db.execute(
         select(User.primary_professional_role)
         .join(Perception, Perception.user_id == User.id)
+        .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
         .where(
             Perception.topic_id == topic_id,
             User.is_active.is_(True),
+            (PerceptionModeration.status.is_(None))
+            | PerceptionModeration.status.in_(("published", "approved")),
             User.primary_professional_role.is_not(None),
         )
         .distinct()
