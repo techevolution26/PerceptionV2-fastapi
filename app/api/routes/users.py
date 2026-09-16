@@ -120,6 +120,9 @@ async def update_preferences(
             visibility = incoming["location_visibility"]
             if visibility not in {"private", "country", "region"}:
                 raise HTTPException(status_code=422, detail="Invalid location visibility.")
+        for key in ("intelligence_participation", "creator_discoverability"):
+            if key in incoming and not isinstance(incoming[key], bool):
+                raise HTTPException(status_code=422, detail=f"{key} must be a boolean.")
         preferences.update(incoming)
         current_user.privacy_preferences = preferences
     await db.commit()

@@ -13,7 +13,8 @@ from app.schemas.recommendations import (
     RecommendationsOut,
     TopicRecommendation,
 )
-from app.services.personalization import build_personalization_profile, score_perception
+from app.services.personalization import build_personalization_profile
+from app.services.privacy_contract_guard import creator_discoverability_allowed, score_perception
 from app.services.perception_serialization import bulk_to_out
 
 
@@ -100,7 +101,11 @@ async def get_recommendations(
             topic_scores[topic.id] = max(topic_scores.get(topic.id, 0.0), score)
             topic_meta[topic.id] = (topic, interacted, role_match or geo_match)
 
-        if author is not None and author.id not in followed_user_ids:
+        if (
+            author is not None
+            and author.id not in followed_user_ids
+            and creator_discoverability_allowed(author)
+        ):
             role_match = bool(profile.role and author.primary_professional_role == profile.role)
             geo_match = bool(
                 author.location_visibility in {"country", "region"}

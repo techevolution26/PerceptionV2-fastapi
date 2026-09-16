@@ -15,6 +15,7 @@ from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
 from app.services.personalization import get_personalized_perceptions
 from app.services.related_perceptions import get_related_perceptions
 from app.services.perception_moderation import assess_perception
+from app.services.rate_limiter import enforce_rate_limit
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -63,6 +64,25 @@ async def create_perception(
     topic_id: int = Form(...),
     media: UploadFile | None = File(default=None),
 ):
+    await enforce_rate_limit(
+        scope="perception-create-minute",
+        identity=f"user:{current_user.id}",
+        limit=settings.PERCEPTION_CREATE_RATE_LIMIT_PER_MINUTE,
+        message="You are posting perceptions too quickly. Please take a moment before adding another.",
+    )
+
+    normalized_body = " ".join(body.split())
+    if not normalized_body:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A perception needs some text before it can enter a conversation.",
+        )
+    if len(normalized_body) > 2000:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A perception cannot exceed 2000 characters.",
+        )
+
     topic_exists = await db.execute(select(Topic.id).where(Topic.id == topic_id))
     if topic_exists.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid topic_id")
@@ -71,7 +91,7 @@ async def create_perception(
     if media is not None:
         media_url = await save_upload(media, "perceptions", allowed_types=ALLOWED_MEDIA_TYPES)
 
-    perception = Perception(user_id=current_user.id, topic_id=topic_id, body=body.strip(), media_url=media_url)
+    perception = Perception(user_id=current_user.id, topic_id=topic_id, body=normalized_body, media_url=media_url)
     db.add(perception)
     await db.flush()
 

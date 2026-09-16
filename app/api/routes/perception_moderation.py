@@ -42,7 +42,7 @@ async def moderation_queue(
         .join(User, User.id == Perception.user_id)
         .outerjoin(Topic, Topic.id == Perception.topic_id)
         .where(PerceptionModeration.status == status_filter.value)
-        .order_by(PerceptionModeration.created_at.asc(), PerceptionModeration.id.asc())
+        .order_by(PerceptionModeration.checked_at.asc(), PerceptionModeration.id.asc())
         .limit(limit)
     )
     return [

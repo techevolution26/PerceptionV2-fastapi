@@ -105,9 +105,12 @@ async def _topic_semantics(
         select(Perception.topic_id, Comment.user_id, CommentIntelligence)
         .join(Comment, Comment.perception_id == Perception.id)
         .join(CommentIntelligence, Comment.id == CommentIntelligence.comment_id)
+        .join(User, User.id == Comment.user_id)
         .where(
             Perception.topic_id.in_(topic_ids),
             CommentIntelligence.status == "analyzed",
+            User.is_active.is_(True),
+            User.privacy_preferences["intelligence_participation"].as_boolean().is_not(False),
             (PerceptionModeration.status.is_(None))
             | PerceptionModeration.status.in_(("published", "approved")),
         )

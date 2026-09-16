@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import Comment, CommentIntelligence, Follow, Perception, PerceptionModeration, Topic, User
 from app.schemas.related_creators import RelatedCreator, RelatedCreatorsOut
 from app.services.personalization import build_personalization_profile
+from app.services.privacy_contract_guard import creator_discoverability_allowed
 
 MIN_SEMANTIC_SAMPLE = 5
 MIN_SEMANTIC_PARTICIPANTS = 5
@@ -171,6 +172,7 @@ async def get_related_creators(
         .outerjoin(PerceptionModeration, PerceptionModeration.perception_id == Perception.id)
         .where(
             User.is_active.is_(True),
+            User.privacy_preferences["creator_discoverability"].as_boolean().is_not(False),
             (PerceptionModeration.status.is_(None))
             | PerceptionModeration.status.in_(("published", "approved")),
         )
@@ -188,6 +190,7 @@ async def get_related_creators(
         .where(
             Perception.topic_id == topic_id,
             User.is_active.is_(True),
+            User.privacy_preferences["creator_discoverability"].as_boolean().is_not(False),
             (PerceptionModeration.status.is_(None))
             | PerceptionModeration.status.in_(("published", "approved")),
         )
@@ -231,6 +234,7 @@ async def get_related_creators(
         .where(
             Perception.topic_id == topic_id,
             User.is_active.is_(True),
+            User.privacy_preferences["creator_discoverability"].as_boolean().is_not(False),
             (PerceptionModeration.status.is_(None))
             | PerceptionModeration.status.in_(("published", "approved")),
             User.primary_professional_role.is_not(None),

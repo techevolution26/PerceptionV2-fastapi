@@ -16,3 +16,15 @@ def test_multiple_independent_spam_privacy_signals_require_review():
     assert result.status == "pending_review"
     assert "link_heavy" in result.flags
     assert "contact_information" in result.flags
+
+
+def test_single_observable_signal_does_not_hold_a_perception():
+    result = assess_perception("Read more at https://example.com")
+    assert result.status == "published"
+    assert result.flags == ["link_heavy"]
+
+
+def test_contact_information_is_flagged_without_judging_the_viewpoint():
+    result = assess_perception("For project details contact me at test@example.com")
+    assert result.status == "published"
+    assert "contact_information" in result.flags

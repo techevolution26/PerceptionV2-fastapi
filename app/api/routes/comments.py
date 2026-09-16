@@ -11,8 +11,11 @@ from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
 from app.services.notifications import notify
 from app.services.comment_intelligence import upsert_comment_intelligence
 from app.services.subscriptions import get_current_subscription
+from app.services.rate_limiter import enforce_rate_limit
+from app.core.config import get_settings
 
 router = APIRouter(tags=["comments"])
+settings = get_settings()
 
 
 def _load_options():
@@ -164,6 +167,13 @@ async def create_comment(
     This endpoint also supports creating a reply when
     `parent_comment_id` is supplied.
     """
+
+    await enforce_rate_limit(
+        scope="comment-create-minute",
+        identity=f"user:{current_user.id}",
+        limit=settings.COMMENT_CREATE_RATE_LIMIT_PER_MINUTE,
+        message="You are sending comments too quickly. Please slow down for a moment.",
+    )
 
     if not body and media is None:
         raise HTTPException(

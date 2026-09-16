@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     ADMIN_SESSION_RATE_LIMIT_PER_MINUTE: int = 5
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 30
     PASSWORD_RESET_RATE_LIMIT_PER_MINUTE: int = 5
+    PERCEPTION_CREATE_RATE_LIMIT_PER_MINUTE: int = 6
+    COMMENT_CREATE_RATE_LIMIT_PER_MINUTE: int = 20
+    REPORT_RATE_LIMIT_PER_10_MINUTES: int = 5
     PASSWORD_RESET_URL: str = "http://localhost:3000/reset-password"
     MAIL_FROM: str = "no-reply@perception.local"
     SMTP_HOST: str = ""

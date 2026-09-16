@@ -6,6 +6,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import AdminUser, CurrentUser, DbSession
 from app.models.models import AdminAuditLog, Perception, PerceptionReport, User
+from app.core.config import get_settings
+from app.services.rate_limiter import enforce_rate_limit
 from app.schemas.report import (
     CreatePerceptionReportRequest,
     PerceptionReportOut,
@@ -14,6 +16,7 @@ from app.schemas.report import (
 )
 
 router = APIRouter(tags=["reports"])
+settings = get_settings()
 
 
 @router.post(
@@ -27,6 +30,14 @@ async def report_perception(
     current_user: CurrentUser,
     db: DbSession,
 ):
+    await enforce_rate_limit(
+        scope="report-create-10m",
+        identity=f"user:{current_user.id}",
+        limit=settings.REPORT_RATE_LIMIT_PER_10_MINUTES,
+        window_seconds=600,
+        message="You have submitted several reports recently. Please try again later.",
+    )
+
     perception = await db.scalar(
         select(Perception)
         .join(User, User.id == Perception.user_id)

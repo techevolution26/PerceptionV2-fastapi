@@ -127,10 +127,13 @@ async def get_comment_intelligence_rows(
     result = await db.execute(
         select(CommentIntelligence)
         .join(Comment, Comment.id == CommentIntelligence.comment_id)
+        .join(User, User.id == Comment.user_id)
         .where(
             Comment.perception_id == perception_id,
             Comment.created_at >= since,
             CommentIntelligence.status == "analyzed",
+            User.is_active.is_(True),
+            User.privacy_preferences["intelligence_participation"].as_boolean().is_not(False),
         )
         .order_by(Comment.created_at.asc())
     )
@@ -146,10 +149,13 @@ async def get_comment_intelligence_temporal_rows(
     result = await db.execute(
         select(CommentIntelligence, Comment.created_at)
         .join(Comment, Comment.id == CommentIntelligence.comment_id)
+        .join(User, User.id == Comment.user_id)
         .where(
             Comment.perception_id == perception_id,
             Comment.created_at >= since,
             CommentIntelligence.status == "analyzed",
+            User.is_active.is_(True),
+            User.privacy_preferences["intelligence_participation"].as_boolean().is_not(False),
         )
         .order_by(Comment.created_at.asc())
     )
@@ -171,6 +177,7 @@ async def get_comment_intelligence_participant_rows(
             Comment.created_at >= since,
             CommentIntelligence.status == "analyzed",
             User.is_active.is_(True),
+            User.privacy_preferences["intelligence_participation"].as_boolean().is_not(False),
         )
         .order_by(Comment.created_at.asc())
     )

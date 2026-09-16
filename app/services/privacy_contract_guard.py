@@ -77,3 +77,13 @@ def validate_observer_measurements(measurements: dict[str, Any]) -> list[str]:
     if measurements.get("daily_activity") not in ([], None):
         errors.append("observer daily_activity must be empty")
     return errors
+
+
+def intelligence_participation_allowed(user: object) -> bool:
+    preferences = getattr(user, "privacy_preferences", None) or {}
+    return preferences.get("intelligence_participation", True) is True
+
+
+def creator_discoverability_allowed(user: object) -> bool:
+    preferences = getattr(user, "privacy_preferences", None) or {}
+    return preferences.get("creator_discoverability", True) is True
