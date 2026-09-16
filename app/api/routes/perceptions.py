@@ -7,9 +7,11 @@ from app.core.config import get_settings
 from app.api.deps import CurrentUser, DbSession, OptionalUser
 from app.models.models import Perception, Topic, User
 from app.schemas.content import PerceptionOut
+from app.schemas.related_perceptions import RelatedPerceptionsOut
 from app.services.perception_serialization import bulk_to_out, to_out
 from app.services.storage import ALLOWED_MEDIA_TYPES, save_upload
 from app.services.personalization import get_personalized_perceptions
+from app.services.related_perceptions import get_related_perceptions
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -67,6 +69,20 @@ async def create_perception(
     await db.refresh(perception, attribute_names=["user", "topic"])
 
     return await to_out(db, perception, current_user.id)
+
+
+@router.get("/perceptions/{perception_id}/related", response_model=RelatedPerceptionsOut)
+async def related_perceptions(
+    perception_id: int,
+    db: DbSession,
+    viewer: OptionalUser,
+):
+    result = await get_related_perceptions(db, perception_id, viewer.id if viewer else None)
+    if not result.items:
+        source = await db.scalar(select(Perception.id).where(Perception.id == perception_id))
+        if source is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Perception not found")
+    return result
 
 
 @router.get("/perceptions/{perception_id}", response_model=PerceptionOut)

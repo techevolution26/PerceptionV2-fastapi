@@ -7,15 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.models import (
-    Comment,
-    Follow,
-    Like,
-    Perception,
-    SavedPerception,
-    TopicFollow,
-    User,
-)
+from app.models.models import Comment, Follow, Like, Perception, SavedPerception, TopicFollow, User
 
 
 @dataclass(frozen=True)
@@ -47,10 +39,10 @@ def score_perception(
     profile: PersonalizationProfile,
     now: datetime,
 ) -> float:
-    """Score relevance from user context and explicit behavior only.
+    """Score feed relevance from explicit context and behavior.
 
-    This deliberately does not use the perception's global likes/comments/views
-    counts. Those are popularity metrics, not personalization signals.
+    This deliberately excludes global popularity metrics. The score answers
+    "is this relevant to this person?", not "is this popular?".
     """
     score = _recency_score(perception.created_at, now)
 
@@ -71,8 +63,8 @@ def score_perception(
         if profile.industry and author_industry == profile.industry:
             score += 2.0
 
-        # Geography is only a relevance signal when the creator has chosen to
-        # make that broad context public. No city is ever used or exposed.
+        # Only explicitly public broad geography can contribute. City is never
+        # used as a ranking signal.
         if author.location_visibility in {"country", "region"}:
             if profile.country_code and author.country_code == profile.country_code:
                 score += 1.0
@@ -107,9 +99,7 @@ async def build_personalization_profile(
     )
     for topic_id in liked_topics:
         if topic_id is not None:
-            interacted_topic_scores[topic_id] = max(
-                interacted_topic_scores.get(topic_id, 0), 2
-            )
+            interacted_topic_scores[topic_id] = max(interacted_topic_scores.get(topic_id, 0), 2)
 
     saved_topics = await db.scalars(
         select(Perception.topic_id)
@@ -119,9 +109,7 @@ async def build_personalization_profile(
     )
     for topic_id in saved_topics:
         if topic_id is not None:
-            interacted_topic_scores[topic_id] = max(
-                interacted_topic_scores.get(topic_id, 0), 3
-            )
+            interacted_topic_scores[topic_id] = max(interacted_topic_scores.get(topic_id, 0), 3)
 
     commented_topics = await db.scalars(
         select(Perception.topic_id)
@@ -131,9 +119,7 @@ async def build_personalization_profile(
     )
     for topic_id in commented_topics:
         if topic_id is not None:
-            interacted_topic_scores[topic_id] = max(
-                interacted_topic_scores.get(topic_id, 0), 3
-            )
+            interacted_topic_scores[topic_id] = max(interacted_topic_scores.get(topic_id, 0), 3)
 
     return PersonalizationProfile(
         followed_topic_ids=frozenset(followed_topics),
@@ -152,8 +138,14 @@ async def get_personalized_perceptions(
     *,
     limit: int = 50,
 ) -> list[Perception]:
-    """Return a bounded, context-aware feed from the recent candidate pool."""
-    candidate_limit = max(limit * 4, 100)
+    """Rank a bounded recent candidate pool for the current viewer.
+
+    Ranking is intentionally viewer-specific. After relevance scoring, a
+    small diversity constraint prevents one creator/topic from monopolizing
+    the feed. This is not popularity suppression; it is exposure diversity.
+    """
+    limit = max(1, min(limit, 50))
+    candidate_limit = max(limit * 6, 150)
     result = await db.execute(
         select(Perception)
         .join(User, User.id == Perception.user_id)
@@ -168,14 +160,38 @@ async def get_personalized_perceptions(
 
     profile = await build_personalization_profile(db, user)
     now = datetime.now(timezone.utc)
+    scored = [
+        (index, perception, score_perception(perception, profile, now))
+        for index, perception in enumerate(candidates)
+    ]
+    scored.sort(key=lambda item: (item[2], item[1].created_at, -item[0]), reverse=True)
 
-    ranked = sorted(
-        enumerate(candidates),
-        key=lambda item: (
-            score_perception(item[1], profile, now),
-            item[1].created_at,
-            -item[0],
-        ),
-        reverse=True,
-    )
-    return [perception for _, perception in ranked[:limit]]
+    # Diversity is applied after relevance so highly relevant followed topics
+    # still surface first, but a single author/topic cannot fill the whole page.
+    selected: list[Perception] = []
+    deferred: list[tuple[int, Perception, float]] = []
+    topic_counts: dict[int | None, int] = {}
+    author_counts: dict[int, int] = {}
+
+    for item in scored:
+        _, perception, _ = item
+        topic_count = topic_counts.get(perception.topic_id, 0)
+        author_count = author_counts.get(perception.user_id, 0)
+        if topic_count >= 4 or author_count >= 3:
+            deferred.append(item)
+            continue
+        selected.append(perception)
+        topic_counts[perception.topic_id] = topic_count + 1
+        author_counts[perception.user_id] = author_count + 1
+        if len(selected) >= limit:
+            break
+
+    if len(selected) < limit:
+        for _, perception, _ in deferred:
+            if perception.id in {item.id for item in selected}:
+                continue
+            selected.append(perception)
+            if len(selected) >= limit:
+                break
+
+    return selected

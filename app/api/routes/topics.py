@@ -3,9 +3,14 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
+from app.services.related_topics import get_related_topics
+from app.services.related_creators import get_related_creators
+
 from app.api.deps import CurrentUser, DbSession, OptionalUser
 from app.models.models import Topic, TopicFollow
 from app.schemas.content import TopicOut, TopicsListOut
+from app.schemas.related_topics import RelatedTopicsOut
+from app.schemas.related_creators import RelatedCreatorsOut
 from app.schemas.misc import FollowToggleOut
 
 router = APIRouter(tags=["topics"])
@@ -45,6 +50,34 @@ async def list_topics(db: DbSession, viewer: OptionalUser):
     # Wrapped in {"topics": [...]} to match the existing Next.js BFF proxy
     # (app/api/topics/route.js), which already unwraps `data.topics`.
     return TopicsListOut(topics=topics)
+
+
+@router.get("/topics/{topic_id}/related", response_model=RelatedTopicsOut)
+async def related_topics(
+    topic_id: int,
+    db: DbSession,
+    viewer: OptionalUser,
+):
+    result = await get_related_topics(db, topic_id, viewer.id if viewer else None)
+    if not result.items:
+        source = await db.scalar(select(Topic.id).where(Topic.id == topic_id))
+        if source is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
+    return result
+
+
+@router.get("/topics/{topic_id}/related-creators", response_model=RelatedCreatorsOut)
+async def related_creators(
+    topic_id: int,
+    db: DbSession,
+    viewer: OptionalUser,
+):
+    result = await get_related_creators(db, topic_id, viewer.id if viewer else None)
+    if not result.items:
+        source = await db.scalar(select(Topic.id).where(Topic.id == topic_id))
+        if source is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found")
+    return result
 
 
 @router.get("/topics/{topic_id}", response_model=TopicOut)
