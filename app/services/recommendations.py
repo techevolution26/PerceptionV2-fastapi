@@ -13,8 +13,8 @@ from app.schemas.recommendations import (
     RecommendationsOut,
     TopicRecommendation,
 )
-from app.services.personalization import build_personalization_profile
-from app.services.privacy_contract_guard import creator_discoverability_allowed, score_perception
+from app.services.personalization import build_personalization_profile, score_perception
+from app.services.privacy_contract_guard import creator_discoverability_allowed
 from app.services.perception_serialization import bulk_to_out
 
 
