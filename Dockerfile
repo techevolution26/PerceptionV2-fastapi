@@ -1,5 +1,5 @@
 # Stage 0: Build tools and wheel compilation
-FROM python:3.12-slim
+FROM python:3.12-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -18,7 +18,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
 
-# Stage1: Cleaning runtime image
+# Stage 1: Cleaning runtime image
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -33,8 +33,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN groupadd -r app && useradd -r -g app -d /app app
 
-# FIXing:Replaced --from=builder with --from=0 to completely bypass name resolution bugs
-COPY --from=0 /opt/venv /opt/venv
+# Maintained index 0 layer copy per engine parsing standards
+COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
 COPY --chown=app:app . .

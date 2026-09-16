@@ -416,7 +416,8 @@ class PerceptionReport(Base):
     __tablename__ = "perception_reports"
     __table_args__ = (
         UniqueConstraint(
-            "reporter_user_id", "perception_id",
+            "reporter_user_id",
+            "perception_id",
             name="uq_perception_report_reporter_perception",
         ),
         Index("ix_perception_reports_status_created", "status", "created_at"),
@@ -445,7 +446,6 @@ class PerceptionReport(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-
 
 
 class AdminAuditLog(Base):
@@ -636,7 +636,7 @@ class PerceptionModeration(Base):
 
     __tablename__ = "perception_moderation"
     __table_args__ = (
-        Index("ix_perception_moderation_status_created", "status", "created_at"),
+        Index("ix_perception_moderation_status_created", "status", "checked_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -652,5 +652,7 @@ class PerceptionModeration(Base):
     reviewed_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     review_note: Mapped[str | None] = mapped_column(String(2000), nullable=True)
