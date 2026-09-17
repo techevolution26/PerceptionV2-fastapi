@@ -274,7 +274,7 @@ async def seed_demo() -> None:
                 verified_professional_roles=([role_code] if verified_demo_user else []),
                 primary_analytics_topic_id=primary_topic.id,
                 verification_status=(
-                    "APPROVED" if verified_demo_user else "NOT_APPLIED"
+                    "VERIFIED" if verified_demo_user else "NOT_APPLIED"
                 ),
                 verification_badge=("PROFESSIONAL" if verified_demo_user else None),
                 bio=(
