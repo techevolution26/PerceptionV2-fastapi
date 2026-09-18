@@ -16,6 +16,7 @@ from app.models.models import (
     Like,
     Perception,
     PerceptionInteraction,
+    PerceptionModeration,
     Topic,
     User,
 )
@@ -49,8 +50,14 @@ from app.services.profile_intelligence import (
     PROFILE_WINDOW_DAYS,
     build_profile_intelligence,
 )
-from app.services.intelligence_freshness import assess_intelligence_freshness
-from app.services.intelligence_quality import assess_intelligence_quality
+from app.services.intelligence_freshness import (
+    assess_intelligence_freshness,
+    assess_topic_freshness,
+)
+from app.services.intelligence_quality import (
+    assess_intelligence_quality,
+    assess_topic_quality,
+)
 from app.services.evidence_governance import assess_evidence_governance
 from app.services.semantic_model_governance import assess_semantic_model_governance
 from app.schemas.profile_intelligence import ProfileIntelligence
@@ -1312,10 +1319,16 @@ async def topic_intelligence(
         await db.execute(
             select(Perception.id, Perception.created_at)
             .join(User, User.id == Perception.user_id)
+            .outerjoin(
+                PerceptionModeration,
+                PerceptionModeration.perception_id == Perception.id,
+            )
             .where(
                 Perception.topic_id == topic_id,
                 Perception.created_at <= now,
                 User.is_active.is_(True),
+                (PerceptionModeration.status.is_(None))
+                | PerceptionModeration.status.in_(("published", "approved")),
             )
             .order_by(Perception.created_at.asc())
         )
@@ -1356,6 +1369,24 @@ async def topic_intelligence(
         )
         participant_rows = list(participant_result.all())
 
+    freshness = await assess_topic_freshness(db, perception_ids, period_start)
+    quality = await assess_topic_quality(
+        db, perception_ids, period_start, minimum=TOPIC_SAMPLE_MINIMUM
+    )
+    semantic_model_governance = assess_semantic_model_governance(
+        [row for row, _pid, _created_at in semantic_rows],
+        minimum_version_sample=TOPIC_SAMPLE_MINIMUM,
+    )
+    evidence_governance = assess_evidence_governance(
+        analyzed_count=quality["analyzed_comment_count"],
+        pending_count=quality["pending_comment_count"],
+        failed_count=quality["failed_comment_count"],
+        quality_status=quality["status"],
+        quality_score=quality["quality_score"],
+        freshness_status=freshness["status"],
+        minimum=TOPIC_SAMPLE_MINIMUM,
+    )
+
     return build_topic_intelligence(
         topic_id=topic.id,
         topic_name=topic.name,
@@ -1368,6 +1399,10 @@ async def topic_intelligence(
         upgrade_message=upgrade_message,
         decision_intent=decision_intent,
         minimum=TOPIC_SAMPLE_MINIMUM,
+        quality_report=quality,
+        freshness=freshness,
+        evidence_governance=evidence_governance,
+        semantic_model_governance=semantic_model_governance,
     )
 
 

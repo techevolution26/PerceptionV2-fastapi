@@ -2,7 +2,14 @@ from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, Field
 
-from app.schemas.perception_intelligence import SemanticDistribution, SemanticTheme
+from app.schemas.perception_intelligence import (
+    EvidenceGovernance,
+    IntelligenceFreshness,
+    IntelligenceQuality,
+    SemanticDistribution,
+    SemanticModelGovernance,
+    SemanticTheme,
+)
 
 
 class TopicIntelligenceContext(BaseModel):
@@ -110,6 +117,36 @@ class TopicPattern(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class TopicSignal(BaseModel):
+    label: str
+    description: str
+    status: Literal["observed_signal"]
+    sample_size: int
+    evidence_type: str
+    limitations: list[str] = Field(default_factory=list)
+
+
+class TopicCohortComparison(BaseModel):
+    dimension: str
+    cohort_a: str
+    cohort_b: str
+    sample_size_a: int
+    sample_size_b: int
+    leading_stance_a: str | None
+    leading_stance_b: str | None
+    shared_themes: list[str] = Field(default_factory=list)
+    type: str
+    description: str
+
+
+class TopicConvergenceDivergence(BaseModel):
+    status: Literal["available", "insufficient_comparison"]
+    sample_minimum: int
+    convergence: list[TopicCohortComparison]
+    divergence: list[TopicCohortComparison]
+    note: str
+
+
 class TopicIntelligenceProvenance(BaseModel):
     trace_id: str
     evidence_chain: list[str] = Field(default_factory=list)
@@ -143,6 +180,12 @@ class TopicIntelligence(BaseModel):
     perspectives: TopicPerspectives
     temporal: TopicTemporal
     patterns: list[TopicPattern]
+    signals: list[TopicSignal]
+    convergence_divergence: TopicConvergenceDivergence
     decision_context: TopicDecisionContext
     provenance: TopicIntelligenceProvenance
+    quality: IntelligenceQuality
+    freshness: IntelligenceFreshness
+    evidence_governance: EvidenceGovernance
+    semantic_model_governance: SemanticModelGovernance
     limitations: list[str]

@@ -16,6 +16,8 @@ from app.services.comment_intelligence import aggregate_comment_intelligence
 from app.services.comment_cross_analysis import (
     aggregate_professional_geographic_semantics,
 )
+from app.services.perception_intelligence import analyze_cross_lens_divergence
+from app.services.intelligence_freshness import _aware
 
 TOPIC_INTELLIGENCE_SCHEMA_VERSION = "1.0"
 TOPIC_SAMPLE_MINIMUM = 5
@@ -79,8 +81,64 @@ def build_topic_intelligence(
     minimum: int = TOPIC_SAMPLE_MINIMUM,
     perception_minimum: int = TOPIC_PERCEPTION_MINIMUM,
     participant_minimum: int = TOPIC_PARTICIPANT_MINIMUM,
+    quality_report: dict[str, Any] | None = None,
+    freshness: dict[str, Any] | None = None,
+    evidence_governance: dict[str, Any] | None = None,
+    semantic_model_governance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    rows = semantic_rows
+    quality_report = quality_report or {
+        "status": "not_ready",
+        "analyzed_comment_count": 0,
+        "quality_score": None,
+        "low_quality_comment_count": 0,
+        "low_quality_share": None,
+        "failed_comment_count": 0,
+        "pending_comment_count": 0,
+        "model_versions": [],
+        "note": "Quality metrics were not computed for this request.",
+        "limitations": [],
+    }
+    freshness = freshness or {
+        "status": "current",
+        "recalculation_required": False,
+        "source_comment_count": 0,
+        "analyzed_comment_count": 0,
+        "pending_comment_count": 0,
+        "failed_comment_count": 0,
+        "latest_source_at": None,
+        "latest_analysis_at": None,
+        "note": "Freshness was not computed for this request.",
+    }
+    evidence_governance = evidence_governance or {
+        "status": "restricted",
+        "minimum_sample": minimum,
+        "analyzed_comment_count": 0,
+        "pending_comment_count": 0,
+        "failed_comment_count": 0,
+        "quality_threshold": 0.60,
+        "quality_score": None,
+        "freshness_status": freshness["status"],
+        "patterns_eligible": False,
+        "signals_eligible": False,
+        "reasons": ["Evidence governance was not computed for this request."],
+        "rules": [],
+    }
+    semantic_model_governance = semantic_model_governance or {
+        "status": "insufficient_sample",
+        "active_model_versions": [],
+        "baseline_model_version": None,
+        "latest_model_version": None,
+        "compared_sample_size": 0,
+        "distribution_shifts": [],
+        "note": "Model governance was not computed for this request.",
+        "limitations": [],
+    }
+
+    # Postgres returns timezone-aware datetimes for DateTime(timezone=True)
+    # columns; SQLite (used in the fast local test suite) does not. Normalize
+    # once at the entry point so every downstream comparison against
+    # period_start/period_end (always aware) is safe on both backends.
+    rows = [(row, pid, _aware(created_at)) for row, pid, created_at in semantic_rows]
     by_perception: dict[int, list[CommentIntelligence]] = defaultdict(list)
     for intelligence, perception_id, _created_at in rows:
         by_perception[perception_id].append(intelligence)
@@ -145,6 +203,23 @@ def build_topic_intelligence(
             "professional_semantic_segments": [],
             "geographic_semantic_segments": [],
             "professional_geographic_segments": [],
+        }
+    )
+
+    convergence_divergence = (
+        analyze_cross_lens_divergence(
+            professional_segments=perspectives["professional_semantic_segments"],
+            geographic_segments=perspectives["geographic_semantic_segments"],
+            cross_lens_segments=perspectives["professional_geographic_segments"],
+            minimum=minimum,
+        )
+        if semantic_status == "available"
+        else {
+            "status": "insufficient_comparison",
+            "sample_minimum": minimum,
+            "convergence": [],
+            "divergence": [],
+            "note": "Convergence and divergence comparisons are withheld until Topic perspectives qualify.",
         }
     )
 
@@ -246,10 +321,35 @@ def build_topic_intelligence(
                 }
             )
 
+    # Signals are patterns promoted to a higher-confidence status once the
+    # underlying evidence also clears quality and freshness governance, not
+    # merely the sample threshold that qualifies a pattern.
+    signals: list[dict[str, Any]] = []
+    if evidence_governance["signals_eligible"]:
+        for pattern in patterns:
+            signals.append(
+                {
+                    "label": pattern["label"],
+                    "description": pattern["description"],
+                    "status": "observed_signal",
+                    "sample_size": pattern["sample_size"],
+                    "evidence_type": pattern["evidence_type"],
+                    "limitations": pattern["limitations"],
+                }
+            )
+
     # Free intelligence is intentionally bounded; full topic perspectives and
     # temporal evidence remain available only to entitled viewers.
     if access_tier == "free_teaser":
         patterns = patterns[:1]
+        signals = []
+        convergence_divergence = {
+            "status": "insufficient_comparison",
+            "sample_minimum": minimum,
+            "convergence": [],
+            "divergence": [],
+            "note": "Subscribe to unlock Topic convergence and divergence comparisons.",
+        }
         perspectives = {
             "cross_analysis_status": "insufficient_sample",
             "cross_analysis_sample_minimum": minimum,
@@ -414,7 +514,13 @@ def build_topic_intelligence(
             "note": f"Only {TOPIC_BUCKET_DAYS}-day Topic windows with at least {minimum} analyzed comments are shown as evidence.",
         },
         "patterns": patterns,
+        "signals": signals,
+        "convergence_divergence": convergence_divergence,
         "decision_context": decision,
         "provenance": provenance,
+        "quality": quality_report,
+        "freshness": freshness,
+        "evidence_governance": evidence_governance,
+        "semantic_model_governance": semantic_model_governance,
         "limitations": limitations,
     }
